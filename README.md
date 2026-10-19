@@ -73,3 +73,9 @@ export default defineConfig([
 ])
 
 ```
+
+## Cómo ejecutar
+
+1. `npm install`
+2. Copiar `.env.example` a `.env` y completar las claves de Supabase.
+3. `npm run dev`
