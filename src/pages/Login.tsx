@@ -4,7 +4,7 @@ import { useAuth } from '../hooks/AuthContext'
 import { supabase } from '../services/supabaseClient'
 
 export default function Login() {
-  const { session, perfil, cargando } = useAuth()
+  const { session, perfil, cargando, errorAcceso, limpiarErrorAcceso } = useAuth()
   const [correo, setCorreo] = useState('')
   const [contrasena, setContrasena] = useState('')
   const [error, setError] = useState('')
@@ -25,18 +25,14 @@ export default function Login() {
   async function iniciarSesion(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setError('')
+    limpiarErrorAcceso()
     setEnviando(true)
 
     try {
       const { error: errorLogin } = await supabase.auth.signInWithPassword({
-  email: correo.trim(),
-  password: contrasena,
-})
-
-if (errorLogin) {
-  console.error('Error de Supabase Auth:', errorLogin)
-  setError('No se pudo iniciar sesión. Revisa la consola del navegador.')
-}
+        email: correo.trim(),
+        password: contrasena,
+      })
 
       if (errorLogin) {
         setError('No se pudo iniciar sesión. Verifica tus credenciales.')
@@ -108,12 +104,9 @@ if (errorLogin) {
             />
           </div>
 
-          {error && (
-            <p
-              role="alert"
-              className="rounded-lg bg-red-50 p-3 text-sm text-red-700"
-            >
-              {error}
+          {(error || errorAcceso) && (
+            <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
+              {error || errorAcceso}
             </p>
           )}
 

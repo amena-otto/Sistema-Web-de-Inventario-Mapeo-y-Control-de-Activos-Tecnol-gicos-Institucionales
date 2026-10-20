@@ -1,4 +1,3 @@
-
 import {
   createContext,
   useContext,
@@ -17,10 +16,14 @@ export type Perfil = {
   activo: boolean
 }
 
+type ResultadoPerfil = { userId: string; perfil: Perfil | null }
+
 type AuthContextType = {
   session: Session | null
   perfil: Perfil | null
   cargando: boolean
+  errorAcceso: string
+  limpiarErrorAcceso: () => void
   cerrarSesion: () => Promise<void>
 }
 
@@ -28,30 +31,25 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
-  const [perfil, setPerfil] = useState<Perfil | null>(null)
-  const [cargando, setCargando] = useState(true)
+  const [inicializada, setInicializada] = useState(false)
+  const [resultado, setResultado] = useState<ResultadoPerfil | null>(null)
+  const [errorAcceso, setErrorAcceso] = useState('')
+
+  const userId = session?.user.id ?? null
 
   useEffect(() => {
     let vigente = true
 
-    const inicializar = async () => {
-      const { data, error } = await supabase.auth.getSession()
-
+    supabase.auth.getSession().then(({ data, error }) => {
       if (!vigente) return
-
-      if (error) {
-        console.error('Error al recuperar la sesión:', error.message)
-      }
-
-      setSession(data?.session ?? null)
-      setCargando(false)
-    }
-
-    void inicializar()
+      if (error) console.error('Error al recuperar la sesión:', error.message)
+      setSession(data.session ?? null)
+      setInicializada(true)
+    })
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, nuevaSesion) => {
+    } = supabase.auth.onAuthStateChange((_evento, nuevaSesion) => {
       setSession(nuevaSesion)
     })
 
@@ -62,40 +60,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => {
+    if (!userId) return
+
     let vigente = true
 
     const cargarPerfil = async () => {
-      setPerfil(null)
-
-      if (!session?.user) {
-        setCargando(false)
-        return
-      }
-
-      setCargando(true)
-
       const { data, error } = await supabase
         .from('profiles')
         .select('id, nombres, apellidos, rol, activo')
-        .eq('id', session.user.id)
+        .eq('id', userId)
         .single()
 
       if (!vigente) return
 
       if (error || !data) {
         console.error('No se pudo cargar el perfil:', error?.message)
-        setPerfil(null)
-      } else if (
-        ['admin', 'tecnico', 'consulta'].includes(data.rol) &&
-        data.activo === true
-      ) {
-        setPerfil(data as Perfil)
-      } else {
-        setPerfil(null)
+        setErrorAcceso('No se pudo verificar tu perfil de usuario.')
+        setResultado({ userId, perfil: null })
         await supabase.auth.signOut()
+        return
       }
 
-      setCargando(false)
+      const rolValido = ['admin', 'tecnico', 'consulta'].includes(data.rol)
+
+      if (rolValido && data.activo === true) {
+        setResultado({ userId, perfil: data as Perfil })
+      } else {
+        setErrorAcceso('Tu cuenta está desactivada o no tiene un rol asignado.')
+        setResultado({ userId, perfil: null })
+        await supabase.auth.signOut()
+      }
     }
 
     void cargarPerfil()
@@ -103,19 +97,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       vigente = false
     }
-  }, [session])
+  }, [userId])
+
+  const perfil = resultado && resultado.userId === userId ? resultado.perfil : null
+  const cargando =
+    !inicializada || (userId !== null && resultado?.userId !== userId)
+
+  const limpiarErrorAcceso = () => setErrorAcceso('')
 
   const cerrarSesion = async () => {
     const { error } = await supabase.auth.signOut()
-
-    if (error) {
-      throw error
-    }
+    if (error) throw error
   }
 
   return (
     <AuthContext.Provider
-      value={{ session, perfil, cargando, cerrarSesion }}
+      value={{
+        session,
+        perfil,
+        cargando,
+        errorAcceso,
+        limpiarErrorAcceso,
+        cerrarSesion,
+      }}
     >
       {children}
     </AuthContext.Provider>
