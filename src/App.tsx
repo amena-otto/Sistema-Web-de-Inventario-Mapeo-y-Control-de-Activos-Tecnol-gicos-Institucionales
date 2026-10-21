@@ -10,7 +10,8 @@ import Reportes from './pages/Reportes'
 import Usuarios from './pages/Usuarios'
 import Login from './pages/Login'
 import RestablecerPassword from './pages/RestablecerPassword'
-import { useAuth, type Perfil } from './hooks/AuthContext'
+import { useAuth } from './hooks/useAuth'
+import { usePermissions, type Permiso } from './hooks/usePermissions'
 
 function RutaProtegida() {
   const { session, perfil, cargando } = useAuth()
@@ -30,16 +31,16 @@ function RutaProtegida() {
   return <Outlet />
 }
 
-function RutaPorRol({
-  roles,
+function RutaPorPermiso({
+  permiso,
   children,
 }: {
-  roles: Perfil['rol'][]
+  permiso: Permiso
   children?: ReactNode
 }) {
-  const { perfil } = useAuth()
+  const { can } = usePermissions()
 
-  if (!perfil || !roles.includes(perfil.rol)) {
+  if (!can(permiso)) {
     return <Navigate to="/" replace />
   }
 
@@ -58,24 +59,35 @@ export default function App() {
 
         <Route element={<RutaProtegida />}>
           <Route element={<AdminLayout />}>
-            <Route path="/" element={<Dashboard />} />
-
             <Route
-              element={
-                <RutaPorRol roles={['admin', 'tecnico', 'consulta']} />
-              }
+              element={<RutaPorPermiso permiso="inventario.ver" />}
             >
+              <Route path="/" element={<Dashboard />} />
               <Route path="/equipos" element={<Equipos />} />
               <Route path="/ubicaciones" element={<Ubicaciones />} />
+            </Route>
+
+            <Route
+              element={<RutaPorPermiso permiso="reportes.ver" />}
+            >
               <Route path="/reportes" element={<Reportes />} />
             </Route>
 
-            <Route element={<RutaPorRol roles={['admin', 'tecnico']} />}>
+            <Route
+              element={<RutaPorPermiso permiso="mantenimientos.ver" />}
+            >
               <Route path="/mantenimientos" element={<Mantenimientos />} />
+            </Route>
+
+            <Route
+              element={<RutaPorPermiso permiso="movimientos.ver" />}
+            >
               <Route path="/movimientos" element={<Movimientos />} />
             </Route>
 
-            <Route element={<RutaPorRol roles={['admin']} />}>
+            <Route
+              element={<RutaPorPermiso permiso="usuarios.administrar" />}
+            >
               <Route path="/usuarios" element={<Usuarios />} />
             </Route>
           </Route>

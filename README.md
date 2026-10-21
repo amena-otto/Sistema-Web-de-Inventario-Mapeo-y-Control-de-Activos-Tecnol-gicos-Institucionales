@@ -1,81 +1,52 @@
-# React + TypeScript + Vite
+# Sistema Web de Inventario OT
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Aplicación React, TypeScript y Vite para administrar el inventario tecnológico
+institucional mediante Supabase.
 
-Currently, two official plugins are available:
+## Inicio local
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+1. Instala Node.js y las dependencias con `npm install`.
+2. Copia `.env.example` a `.env`.
+3. Completa `VITE_SUPABASE_URL` y `VITE_SUPABASE_PUBLISHABLE_KEY` con los datos
+   públicos del proyecto Supabase.
+4. Ejecuta `npm run dev`.
 
-## React Compiler
+No agregues claves `service_role` ni credenciales administrativas al frontend.
+El archivo `.env` está excluido de Git.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Configuración de autenticación
 
-## Expanding the ESLint configuration
+- Habilita el proveedor de correo y contraseña en Supabase Auth.
+- Configura la URL del sitio y las URL de redirección permitidas para el
+  entorno; incluye `/restablecer-password` para el enlace de recuperación.
+- Cada cuenta de Auth debe tener un perfil relacionado por el mismo `id`, con
+  un rol válido (`admin`, `tecnico` o `consulta`) y `activo = true`.
+- El administrador puede invitar personal desde la pantalla de usuarios. La
+  función `admin-crear-usuario` verifica la sesión y el perfil de administrador
+  activo en el servidor antes de crear la cuenta. Configura el secreto
+  `APP_URL` de la Edge Function con el origen público de la aplicación y agrega
+  `${APP_URL}/restablecer-password` a las URL de redirección permitidas de Auth.
+- La Edge Function usa `SUPABASE_SERVICE_ROLE_KEY` exclusivamente en el
+  servidor. Nunca agregues esa clave al frontend ni a variables `VITE_*`.
+  El invitado recibe un correo para establecer su contraseña y queda activo
+  con el rol que asignó el administrador.
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## Roles y límites de seguridad
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+La matriz de permisos de `src/hooks/usePermissions.ts` es la fuente única para
+la visibilidad del menú y la protección de rutas. El frontend mejora la
+experiencia, pero no sustituye la autorización del servidor.
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+Las políticas RLS de todas las tablas expuestas y las políticas del bucket de
+fotografías deben configurarse y verificarse en Supabase. Esas políticas son
+las que deben impedir operaciones no autorizadas también al llamar la API
+directamente. La auditoría del usuario responsable y la aplicación efectiva de
+los estados de cuenta dependen de las funciones y políticas de base de datos.
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+No se deben guardar contraseñas Wi-Fi, credenciales administrativas ni otros
+secretos en las fichas de inventario.
 
-```
+## Verificación
 
-You can also install [eslint-plugin-react-x](https://npmx.dev/package/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://npmx.dev/package/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
-```
-
-## Cómo ejecutar
-
-1. `npm install`
-2. Copiar `.env.example` a `.env` y completar las claves de Supabase.
-3. `npm run dev`
+- `npm run build`: comprueba TypeScript y genera la aplicación de producción.
+- `npm run lint`: ejecuta ESLint.

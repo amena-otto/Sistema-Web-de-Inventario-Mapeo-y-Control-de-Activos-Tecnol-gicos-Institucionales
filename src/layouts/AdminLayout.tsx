@@ -1,19 +1,21 @@
 import { useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { useAuth, type Perfil } from '../hooks/AuthContext'
+import type { Perfil } from '../hooks/AuthContext'
+import { useAuth } from '../hooks/useAuth'
+import { usePermissions, type Permiso } from '../hooks/usePermissions'
 
 const menu: {
   to: string
   label: string
-  roles: Perfil['rol'][]
+  permiso: Permiso
 }[] = [
-  { to: '/', label: 'Dashboard', roles: ['admin', 'tecnico', 'consulta'] },
-  { to: '/equipos', label: 'Equipos', roles: ['admin', 'tecnico', 'consulta'] },
-  { to: '/ubicaciones', label: 'Ubicaciones', roles: ['admin', 'tecnico', 'consulta'] },
-  { to: '/mantenimientos', label: 'Mantenimientos', roles: ['admin', 'tecnico'] },
-  { to: '/movimientos', label: 'Movimientos', roles: ['admin', 'tecnico'] },
-  { to: '/reportes', label: 'Reportes', roles: ['admin', 'tecnico', 'consulta'] },
-  { to: '/usuarios', label: 'Usuarios', roles: ['admin'] },
+  { to: '/', label: 'Dashboard', permiso: 'inventario.ver' },
+  { to: '/equipos', label: 'Equipos', permiso: 'inventario.ver' },
+  { to: '/ubicaciones', label: 'Ubicaciones', permiso: 'inventario.ver' },
+  { to: '/mantenimientos', label: 'Mantenimientos', permiso: 'mantenimientos.ver' },
+  { to: '/movimientos', label: 'Movimientos', permiso: 'movimientos.ver' },
+  { to: '/reportes', label: 'Reportes', permiso: 'reportes.ver' },
+  { to: '/usuarios', label: 'Usuarios', permiso: 'usuarios.administrar' },
 ]
 
 const nombreRol: Record<Perfil['rol'], string> = {
@@ -26,11 +28,10 @@ export default function AdminLayout() {
   const [abierto, setAbierto] = useState(false)
   const [error, setError] = useState('')
   const { perfil, cerrarSesion } = useAuth()
+  const { can } = usePermissions()
   const navigate = useNavigate()
 
-  const menuVisible = menu.filter(
-    (item) => perfil && item.roles.includes(perfil.rol),
-  )
+  const menuVisible = menu.filter((item) => can(item.permiso))
 
   async function manejarCierreSesion() {
     setError('')
