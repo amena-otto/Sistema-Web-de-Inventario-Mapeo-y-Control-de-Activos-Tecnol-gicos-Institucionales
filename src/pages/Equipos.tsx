@@ -13,6 +13,7 @@ import {
   importarFila,
   listarOpcionesRelacion,
   listarEquipos,
+  listarEquiposParaExportar,
   obtenerDetalleEquipo,
   obtenerEquipo,
   posiblesDuplicados,
@@ -78,7 +79,50 @@ function fechaCorta(value: string | null) {
   return value ? new Date(`${value.slice(0, 10)}T00:00:00`).toLocaleDateString() : '—'
 }
 
+function normalizarCsv(valor: string) {
+  return valor
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLocaleLowerCase()
+}
+
+function normalizarCabeceraCsv(valor: string) {
+  return normalizarCsv(valor).replace(/\s+/g, '_')
+}
+
+function detectarSeparador(texto: string) {
+  const primeraLinea = texto.split(/\r\n|\n|\r/, 1)[0] ?? ''
+  let entreComillas = false
+  const conteos = new Map<string, number>([
+    [',', 0],
+    [';', 0],
+    ['\t', 0],
+  ])
+
+  for (let indice = 0; indice < primeraLinea.length; indice += 1) {
+    const caracter = primeraLinea[indice]
+    if (caracter === '"' && primeraLinea[indice + 1] === '"' && entreComillas) {
+      indice += 1
+    } else if (caracter === '"') {
+      entreComillas = !entreComillas
+    } else if (!entreComillas && conteos.has(caracter)) {
+      conteos.set(caracter, (conteos.get(caracter) ?? 0) + 1)
+    }
+  }
+
+  const [separador, cantidad] = [...conteos.entries()].sort(
+    (a, b) => b[1] - a[1],
+  )[0]
+  if (!cantidad) {
+    throw new Error('No se reconoció el separador del CSV. Usa la plantilla descargable.')
+  }
+  return separador
+}
+
 function analizarCsv(texto: string): string[][] {
+  const separador = detectarSeparador(texto)
   const filas: string[][] = []
   let fila: string[] = []
   let celda = ''
@@ -86,12 +130,19 @@ function analizarCsv(texto: string): string[][] {
 
   for (let indice = 0; indice < texto.length; indice += 1) {
     const caracter = texto[indice]
-    if (caracter === '"' && entreComillas && texto[indice + 1] === '"') {
-      celda += '"'
-      indice += 1
-    } else if (caracter === '"') {
-      entreComillas = !entreComillas
-    } else if (caracter === ',' && !entreComillas) {
+    if (caracter === '"') {
+      if (entreComillas && texto[indice + 1] === '"') {
+        celda += '"'
+        indice += 1
+      } else if (entreComillas) {
+        entreComillas = false
+      } else if (!celda.trim()) {
+        celda = ''
+        entreComillas = true
+      } else {
+        celda += caracter
+      }
+    } else if (caracter === separador && !entreComillas) {
       fila.push(celda.trim())
       celda = ''
     } else if ((caracter === '\n' || caracter === '\r') && !entreComillas) {
@@ -109,6 +160,47 @@ function analizarCsv(texto: string): string[][] {
   fila.push(celda.trim())
   if (fila.some(Boolean)) filas.push(fila)
   return filas
+}
+
+async function leerArchivoCsv(archivo: File) {
+  const bytes = new Uint8Array(await archivo.arrayBuffer())
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) {
+    return new TextDecoder('utf-16le').decode(bytes.subarray(2))
+  }
+  if (bytes[0] === 0xfe && bytes[1] === 0xff) {
+    return new TextDecoder('utf-16be').decode(bytes.subarray(2))
+  }
+  try {
+    return new TextDecoder('utf-8', { fatal: true })
+      .decode(bytes)
+      .replace(/^\uFEFF/, '')
+  } catch {
+    return new TextDecoder('windows-1252').decode(bytes)
+  }
+}
+
+function fechaCsvAISO(valor: string) {
+  const fecha = valor.trim()
+  if (!fecha) return null
+
+  let partes = fecha.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/)
+  let iso: string
+  if (partes) {
+    iso = `${partes[1]}-${partes[2].padStart(2, '0')}-${partes[3].padStart(2, '0')}`
+  } else {
+    partes = fecha.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/)
+    if (!partes) throw new Error(`fecha inválida: ${fecha}`)
+    iso = `${partes[3]}-${partes[2].padStart(2, '0')}-${partes[1].padStart(2, '0')}`
+  }
+
+  const fechaValidada = new Date(`${iso}T00:00:00.000Z`)
+  if (
+    Number.isNaN(fechaValidada.getTime()) ||
+    fechaValidada.toISOString().slice(0, 10) !== iso
+  ) {
+    throw new Error(`fecha inválida: ${fecha}`)
+  }
+  return iso
 }
 
 export default function Equipos() {
@@ -155,6 +247,7 @@ export default function Equipos() {
   const [foto, setFoto] = useState<File | null>(null)
   const fotoInputRef = useRef<HTMLInputElement>(null)
   const [importando, setImportando] = useState(false)
+  const [exportando, setExportando] = useState(false)
   const [resultadoImportacion, setResultadoImportacion] = useState<string[]>([])
 
   useEffect(
@@ -502,14 +595,96 @@ export default function Equipos() {
   }
 
   function descargarPlantilla() {
+    const categoriaEjemplo = (
+      categorias[0]?.nombre ?? 'Reemplazar por categoría existente'
+    ).replace(/"/g, '""')
     const contenido =
       'nombre,categoria,marca,modelo,numero_serie,codigo_patrimonial,ambiente_codigo,estado_operativo,fecha_adquisicion,fecha_garantia,posicion,observaciones,Procesador,Memoria RAM,Almacenamiento,Sistema operativo\r\n' +
-      'Computadora aula 1,Computadoras,Lenovo,ThinkCentre,,PAT-001,A101,operativo,2025-01-15,,Puesto 1,Ejemplo,Intel Core i5,8 GB DDR4,SSD 256 GB,Windows'
+      `Computadora aula 1,"${categoriaEjemplo}",Lenovo,ThinkCentre,,PAT-001,A101,operativo,2025-01-15,,Puesto 1,Ejemplo,Intel Core i5,8 GB DDR4,SSD 256 GB,Windows`
     const enlace = document.createElement('a')
     enlace.href = URL.createObjectURL(new Blob([contenido], { type: 'text/csv;charset=utf-8' }))
     enlace.download = 'plantilla-inventario.csv'
     enlace.click()
     URL.revokeObjectURL(enlace.href)
+  }
+
+  function valorCsv(valor: string | null | undefined) {
+    const seguro = valor ?? ''
+    const protegido = /^[=+\-@\t\r]/.test(seguro) ? `'${seguro}` : seguro
+    return `"${protegido.replace(/"/g, '""')}"`
+  }
+
+  async function exportarInventario() {
+    setExportando(true)
+    setError('')
+    try {
+      const { equipos: todos, categorias: categoriasExportadas, ambientes: ambientesExportados } =
+        await listarEquiposParaExportar({
+          busqueda,
+          estado,
+          categoriaId: categoriaFiltro,
+          ambienteId: ambienteFiltro,
+        })
+      const nombresCategoria = new Map(
+        categoriasExportadas.map((categoria) => [categoria.id, categoria.nombre]),
+      )
+      const datosAmbiente = new Map(
+        ambientesExportados.map((ambiente) => [ambiente.id, ambiente]),
+      )
+      const cabeceras = [
+        'codigo_institucional',
+        'nombre',
+        'categoria',
+        'marca',
+        'modelo',
+        'numero_serie',
+        'codigo_patrimonial',
+        'ambiente_codigo',
+        'estado_operativo',
+        'situacion',
+        'fecha_adquisicion',
+        'fecha_garantia',
+        'posicion',
+        'observaciones',
+      ]
+      const filas = todos.map((equipo) => {
+        const ambiente = equipo.ambiente_id
+          ? datosAmbiente.get(equipo.ambiente_id)
+          : undefined
+        return [
+          equipo.codigo_institucional,
+          equipo.nombre,
+          nombresCategoria.get(equipo.categoria_id) ?? equipo.categoria_id,
+          equipo.marca,
+          equipo.modelo,
+          equipo.numero_serie,
+          equipo.codigo_patrimonial,
+          ambiente?.codigo,
+          equipo.estado_operativo,
+          equipo.situacion,
+          equipo.fecha_adquisicion,
+          equipo.fecha_garantia,
+          equipo.posicion,
+          equipo.observaciones,
+        ]
+          .map(valorCsv)
+          .join(',')
+      })
+      const contenido = `\uFEFF${cabeceras.join(',')}\r\n${filas.join('\r\n')}`
+      const url = URL.createObjectURL(
+        new Blob([contenido], { type: 'text/csv;charset=utf-8' }),
+      )
+      const enlace = document.createElement('a')
+      enlace.href = url
+      enlace.download = 'inventario-equipos.csv'
+      enlace.click()
+      URL.revokeObjectURL(url)
+      setAviso(`Se exportaron ${todos.length} equipos del inventario filtrado.`)
+    } catch (e) {
+      setError(mostrarError(e, 'No se pudo exportar el inventario actual.'))
+    } finally {
+      setExportando(false)
+    }
   }
 
   async function importarCsv(archivo: File) {
@@ -522,38 +697,67 @@ export default function Equipos() {
       if (archivo.size > 2 * 1024 * 1024) {
         throw new Error('El archivo CSV no puede superar 2 MB.')
       }
-      const filas = analizarCsv((await archivo.text()).replace(/^\uFEFF/, ''))
+      const filas = analizarCsv(await leerArchivoCsv(archivo))
       if (filas.length < 2) throw new Error('El CSV no contiene filas para importar.')
       if (filas.length > 501) throw new Error('El límite es 500 equipos por importación.')
 
-      const cabeceras = filas[0].map((valor) => valor.toLowerCase())
+      const cabeceras = filas[0].map(normalizarCabeceraCsv)
+      if (new Set(cabeceras).size !== cabeceras.length) {
+        throw new Error('El CSV contiene encabezados repetidos.')
+      }
       const requeridas = ['nombre', 'categoria', 'estado_operativo']
       const faltantes = requeridas.filter((campo) => !cabeceras.includes(campo))
       if (faltantes.length) {
-        throw new Error(`Faltan columnas obligatorias: ${faltantes.join(', ')}.`)
+        throw new Error(
+          `Faltan columnas obligatorias: ${faltantes.join(', ')}. Descarga la plantilla CSV para ver los encabezados válidos.`,
+        )
       }
 
+      const catalogos = await cargarCatalogos()
+      setCategorias(catalogos.categorias)
+      setAmbientes(catalogos.ambientes)
+      setResponsables(catalogos.responsables)
+
       for (const [indice, fila] of filas.slice(1).entries()) {
-        const valores = Object.fromEntries(
-          cabeceras.map((cabecera, posicion) => [cabecera, fila[posicion] ?? '']),
-        )
         const numeroFila = indice + 2
         try {
-          const categoria = categorias.find(
-            (item) => item.nombre.toLowerCase() === valores.categoria.toLowerCase(),
+          while (fila.length > cabeceras.length && fila.at(-1) === '') fila.pop()
+          if (fila.length > cabeceras.length) {
+            throw new Error(
+              `la fila tiene ${fila.length} columnas y el encabezado tiene ${cabeceras.length}`,
+            )
+          }
+          while (fila.length < cabeceras.length) fila.push('')
+          const valores = Object.fromEntries(
+            cabeceras.map((cabecera, posicion) => [
+              cabecera,
+              (fila[posicion] ?? '').trim(),
+            ]),
           )
-          if (!categoria) throw new Error(`categoría no encontrada: ${valores.categoria}`)
+          const categoriaImportada = catalogos.categorias.find(
+            (item) => normalizarCsv(item.nombre) === normalizarCsv(valores.categoria),
+          )
+          if (!categoriaImportada) {
+            throw new Error(
+              `categoría "${valores.categoria}" no encontrada. Categorías disponibles: ${catalogos.categorias.map((item) => item.nombre).join(', ') || 'ninguna activa'}`,
+            )
+          }
           const ambiente = valores.ambiente_codigo
-            ? ambientes.find(
-                (item) => item.codigo.toLowerCase() === valores.ambiente_codigo.toLowerCase(),
+            ? catalogos.ambientes.find(
+                (item) => normalizarCsv(item.codigo) === normalizarCsv(valores.ambiente_codigo),
               )
             : undefined
           if (valores.ambiente_codigo && !ambiente) {
             throw new Error(`ambiente no encontrado: ${valores.ambiente_codigo}`)
           }
           if (!valores.nombre.trim()) throw new Error('nombre obligatorio')
+          const estadoEntrada = normalizarCsv(valores.estado_operativo).replace(/\s+/g, '_')
+          const estadoNormalizado =
+            estadoEntrada === 'operativo_con_observaciones'
+              ? 'con_fallas'
+              : estadoEntrada
           if (
-            !estadosOperativos.some((opcion) => opcion === valores.estado_operativo)
+            !estadosOperativos.some((opcion) => opcion === estadoNormalizado)
           ) {
             throw new Error(`estado inválido: ${valores.estado_operativo}`)
           }
@@ -561,7 +765,7 @@ export default function Equipos() {
           await importarFila(
             {
               ...vacio,
-              categoria_id: categoria.id,
+              categoria_id: categoriaImportada.id,
               ambiente_id: ambiente?.id ?? null,
               nombre: valores.nombre.trim(),
               marca: valores.marca || null,
@@ -569,17 +773,17 @@ export default function Equipos() {
               numero_serie: valores.numero_serie || null,
               codigo_patrimonial: valores.codigo_patrimonial || null,
               posicion: valores.posicion || null,
-              estado_operativo: valores.estado_operativo as EstadoOperativo,
-              fecha_adquisicion: valores.fecha_adquisicion || null,
-              fecha_garantia: valores.fecha_garantia || null,
+              estado_operativo: estadoNormalizado as EstadoOperativo,
+              fecha_adquisicion: fechaCsvAISO(valores.fecha_adquisicion),
+              fecha_garantia: fechaCsvAISO(valores.fecha_garantia),
               observaciones: valores.observaciones || null,
             },
             valores.numero_serie,
             {
               Procesador: valores.procesador ?? '',
-              'Memoria RAM': valores['memoria ram'] ?? '',
+              'Memoria RAM': valores.memoria_ram ?? '',
               Almacenamiento: valores.almacenamiento ?? '',
-              'Sistema operativo': valores['sistema operativo'] ?? '',
+              'Sistema operativo': valores.sistema_operativo ?? '',
             },
           )
           resultados.push(`Fila ${numeroFila}: importada.`)
@@ -591,6 +795,9 @@ export default function Equipos() {
       setResultadoImportacion(resultados)
       const exitosas = resultados.filter((item) => item.endsWith('importada.')).length
       setAviso(`Importación finalizada: ${exitosas} de ${resultados.length} filas agregadas.`)
+      if (exitosas !== resultados.length) {
+        setError('Algunas filas no se importaron; abre el resultado para revisar el motivo de cada una.')
+      }
       setPagina(1)
       setActualizacion((actual) => actual + 1)
     } catch (e) {
@@ -638,9 +845,11 @@ export default function Equipos() {
         <div className="mt-4">
           <h3 className="text-sm font-semibold text-slate-700">Importación masiva</h3>
           <p className="mt-1 text-sm text-slate-500">
-            Descarga la plantilla, complétala y luego importa el archivo CSV.
+            Descarga la plantilla y complétala. La categoría debe coincidir con
+            una categoría activa; se aceptan CSV de Excel separados por coma o
+            punto y coma.
           </p>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <button
               type="button"
               onClick={descargarPlantilla}
@@ -659,6 +868,23 @@ export default function Equipos() {
               <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" className="h-5 w-5 shrink-0 text-green-700">
                 <path d="M12 3.75v11m0 0 4-4m-4 4-4-4M5 16.75v3.5h14v-3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
+            </button>
+            <button
+              type="button"
+              onClick={() => void exportarInventario()}
+              disabled={exportando}
+              className={`flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-4 text-left transition ${exportando ? 'cursor-wait opacity-60' : 'hover:border-amber-300 hover:bg-amber-50'}`}
+            >
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-amber-100 text-amber-700">
+                <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" className="h-6 w-6">
+                  <path d="M5 3.75h9l5 5v11.5H5V3.75Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+                  <path d="M14 3.75v5h5M12 11v7m0 0 3-3m-3 3-3-3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block font-semibold text-slate-800">{exportando ? 'Preparando exportación...' : 'Exportar inventario'}</span>
+                <span className="mt-0.5 block text-xs text-slate-500">Descarga la tabla actual en CSV</span>
+              </span>
             </button>
             {puedeCrear && (
               <label className={`flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-4 text-left transition ${importando ? 'cursor-wait opacity-60' : 'cursor-pointer hover:border-blue-300 hover:bg-blue-50'}`}>
@@ -909,18 +1135,23 @@ export default function Equipos() {
                   <div className="mt-4 space-y-5">
                     <div>
                       <h4 className="font-semibold">Identificación, ubicación y control</h4>
+                      {editando && (
+                        <p className="mt-1 text-xs text-slate-500">
+                          La ubicación, posición y responsable se cambian desde el módulo Movimientos para conservar su historial.
+                        </p>
+                      )}
                       <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                         <label className="text-sm">Ubicación
-                          <select value={datos.ambiente_id ?? ''} onChange={(e) => cambiarDato('ambiente_id', e.target.value || null)} className="mt-1 w-full rounded border border-slate-300 px-3 py-2">
+                          <select disabled={!!editando} value={datos.ambiente_id ?? ''} onChange={(e) => cambiarDato('ambiente_id', e.target.value || null)} className="mt-1 w-full rounded border border-slate-300 px-3 py-2 disabled:bg-slate-100">
                             <option value="">Sin ubicación asignada</option>
                             {ambientes.map((item) => <option key={item.id} value={item.id}>{item.pabellon} / {item.piso} / {item.codigo} — {item.nombre}</option>)}
                           </select>
                         </label>
                         <label className="text-sm">Código / posición en ambiente
-                          <input maxLength={100} value={datos.posicion ?? ''} onChange={(e) => cambiarDato('posicion', e.target.value)} placeholder="Ej. Escritorio 4" className="mt-1 w-full rounded border border-slate-300 px-3 py-2" />
+                          <input disabled={!!editando} maxLength={100} value={datos.posicion ?? ''} onChange={(e) => cambiarDato('posicion', e.target.value)} placeholder="Ej. Escritorio 4" className="mt-1 w-full rounded border border-slate-300 px-3 py-2 disabled:bg-slate-100" />
                         </label>
                         <label className="text-sm">Responsable asignado
-                          <select value={datos.responsable_id ?? ''} onChange={(e) => cambiarDato('responsable_id', e.target.value || null)} className="mt-1 w-full rounded border border-slate-300 px-3 py-2">
+                          <select disabled={!!editando} value={datos.responsable_id ?? ''} onChange={(e) => cambiarDato('responsable_id', e.target.value || null)} className="mt-1 w-full rounded border border-slate-300 px-3 py-2 disabled:bg-slate-100">
                             <option value="">Sin responsable</option>
                             {responsables.map((item) => <option key={item.id} value={item.id}>{item.nombres} {item.apellidos} ({item.rol})</option>)}
                           </select>

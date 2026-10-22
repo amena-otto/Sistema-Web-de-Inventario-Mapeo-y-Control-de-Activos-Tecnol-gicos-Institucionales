@@ -23,6 +23,8 @@ La base de datos utiliza restricciones de PostgreSQL para mantener la integridad
 | movimientos | ambiente_origen_id | ambientes | id |
 | movimientos | equipo_id | equipos | id |
 | movimientos | responsable_id | profiles | id |
+| movimientos | responsable_anterior_id | profiles | id |
+| movimientos | responsable_nuevo_id | profiles | id |
 | pisos | pabellon_id | pabellones | id |
 | relaciones_equipos | equipo_principal_id | equipos | id |
 | relaciones_equipos | equipo_relacionado_id | equipos | id |
@@ -58,6 +60,18 @@ Se identificaron restricciones para validar los valores y estados de los registr
 - `movimientos_check`: valida una condición definida para los movimientos.
 
 También existen restricciones de obligatoriedad para distintas columnas.
+
+La migración `008_modulo_mantenimientos.sql` admite los estados de intervención
+`pendiente`, `en_proceso` y `completado`, y los tipos `preventivo` y
+`correctivo`. La función de registro solo acepta administradores y técnicos
+activos; inserta la intervención y, si se especifica, actualiza el estado del
+equipo de forma atómica.
+
+La migración `010_control_movimientos.sql` conserva fechas, ubicación,
+responsable y posición anteriores y nuevos. La escritura del historial y la
+actualización del equipo ocurren en una única función transaccional; un trigger
+rechaza cambios directos de ubicación, posición o responsable que no tengan un
+movimiento asociado. Las filas de movimientos son inmutables desde la API.
 
 ## 6. Integridad referencial
 

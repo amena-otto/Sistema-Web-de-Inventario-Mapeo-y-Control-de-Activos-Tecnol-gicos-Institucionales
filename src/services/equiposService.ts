@@ -193,6 +193,89 @@ export async function listarEquipos({
   return { equipos: (data ?? []) as Equipo[], total: count ?? 0 }
 }
 
+export async function listarEquiposParaExportar(filtros: {
+  busqueda: string
+  estado: string
+  categoriaId: string
+  ambienteId: string
+}): Promise<{
+  equipos: Equipo[]
+  categorias: Categoria[]
+  ambientes: Ambiente[]
+}> {
+  const porLote = 500
+  const equipos: Equipo[] = []
+
+  for (let inicio = 0; ; inicio += porLote) {
+    let consulta = supabase
+      .from('equipos')
+      .select(
+        'id, codigo_institucional, categoria_id, ambiente_id, nombre, marca, modelo, numero_serie, codigo_patrimonial, posicion, responsable_id, estado_operativo, situacion, deleted_at, fecha_adquisicion, fecha_garantia, observaciones, created_at, updated_at',
+      )
+      .order('codigo_institucional')
+      .range(inicio, inicio + porLote - 1)
+
+    if (filtros.busqueda) {
+      const seguro = filtros.busqueda
+        .replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑüÜ\s_-]/g, '')
+        .trim()
+      if (seguro) {
+        const patron = `*${seguro}*`
+        consulta = consulta.or(
+          `codigo_institucional.ilike.${patron},nombre.ilike.${patron},marca.ilike.${patron},modelo.ilike.${patron},numero_serie.ilike.${patron},codigo_patrimonial.ilike.${patron}`,
+        )
+      }
+    }
+    if (filtros.estado === 'baja') {
+      consulta = consulta.eq('situacion', 'baja')
+    } else if (filtros.estado === 'archivado') {
+      consulta = consulta.eq('situacion', 'archivado')
+    } else if (filtros.estado) {
+      consulta = consulta.eq('estado_operativo', filtros.estado).eq('situacion', 'activo')
+    }
+    if (filtros.categoriaId) consulta = consulta.eq('categoria_id', filtros.categoriaId)
+    if (filtros.ambienteId) consulta = consulta.eq('ambiente_id', filtros.ambienteId)
+
+    const { data, error } = await consulta
+    if (error) throw error
+
+    const lote = (data ?? []) as Equipo[]
+    equipos.push(...lote)
+    if (lote.length < porLote) break
+  }
+
+  const [categoriasResult, ambientesResult] = await Promise.all([
+    supabase.from('categorias_equipos').select('id, nombre'),
+    supabase
+      .from('ambientes')
+      .select('id, codigo, nombre, pisos!inner(nombre, pabellones!inner(nombre))'),
+  ])
+  if (categoriasResult.error) throw categoriasResult.error
+  if (ambientesResult.error) throw ambientesResult.error
+
+  const ambientes = (ambientesResult.data ?? []).map((item) => {
+    const fila = item as unknown as {
+      id: string
+      codigo: string
+      nombre: string
+      pisos: { nombre: string; pabellones: { nombre: string } }
+    }
+    return {
+      id: fila.id,
+      codigo: fila.codigo,
+      nombre: fila.nombre,
+      piso: fila.pisos.nombre,
+      pabellon: fila.pisos.pabellones.nombre,
+    }
+  })
+
+  return {
+    equipos,
+    categorias: (categoriasResult.data ?? []) as Categoria[],
+    ambientes,
+  }
+}
+
 export async function obtenerEquipo(id: string): Promise<Equipo> {
   const { data, error } = await supabase
     .from('equipos')

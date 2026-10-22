@@ -57,6 +57,18 @@ export async function crearUsuario(
   return data
 }
 
+export async function eliminarUsuarioPermanente(id: string): Promise<void> {
+  const { data, error } = await supabase.functions.invoke<{ success: boolean }>(
+    'admin-eliminar-usuario',
+    { body: { userId: id } },
+  )
+
+  if (error) throw await errorFuncion(error)
+  if (!data?.success) {
+    throw new Error('No se recibió confirmación de la eliminación del usuario.')
+  }
+}
+
 export async function actualizarPerfil(
   id: string,
   cambios: CambiosPerfil,

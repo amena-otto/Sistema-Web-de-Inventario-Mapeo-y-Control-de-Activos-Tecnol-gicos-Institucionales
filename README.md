@@ -17,9 +17,9 @@ El archivo `.env` está excluido de Git.
 ## Configuración de autenticación
 
 - Habilita el proveedor de correo y contraseña en Supabase Auth.
-- Las invitaciones de usuarios solo aceptan direcciones del dominio
-  `@ottotonsmann.edu.pe`; la regla se valida en la aplicación y en la Edge
-  Function `admin-crear-usuario`.
+- Las invitaciones aceptan direcciones `@ottotonsmann.edu.pe` y `@gmail.com`
+  para facilitar pruebas; ambos dominios se validan en la aplicación y en la
+  Edge Function `admin-crear-usuario`.
 - Configura la URL del sitio y las URL de redirección permitidas para el
   entorno; incluye `/restablecer-password` para el enlace de recuperación.
 - Cada cuenta de Auth debe tener un perfil relacionado por el mismo `id`, con
@@ -29,6 +29,11 @@ El archivo `.env` está excluido de Git.
   activo en el servidor antes de crear la cuenta. Configura el secreto
   `APP_URL` de la Edge Function con el origen público de la aplicación y agrega
   `${APP_URL}/restablecer-password` a las URL de redirección permitidas de Auth.
+- Las cuentas inactivas solo se eliminan desde la lista de usuarios antiguos,
+  después de confirmarlo. Despliega también
+  `supabase/functions/admin-eliminar-usuario`; la función solo acepta
+  administradores activos y rechaza cuentas que aún estén activas. Despliega
+  con `supabase functions deploy admin-eliminar-usuario`.
 - La Edge Function usa `SUPABASE_SERVICE_ROLE_KEY` exclusivamente en el
   servidor. Nunca agregues esa clave al frontend ni a variables `VITE_*`.
   El invitado recibe un correo para establecer su contraseña y queda activo
@@ -51,6 +56,12 @@ secretos en las fichas de inventario.
 
 ## Módulos de inventario y mapeo
 
+- El Dashboard presenta indicadores reales del inventario, distribución de
+  equipos por laboratorio, situación operativa, bajas e intervenciones de
+  mantenimiento. Los datos de mantenimiento solo se consultan para perfiles
+  autorizados por las políticas RLS. La navegación aplica el diseño
+  institucional del IES Privado Otto Tonsmann.
+
 - En Supabase SQL Editor, ejecuta en orden y una sola vez:
   `supabase/migrations/004_modulo_inventario.sql` y después
   `supabase/migrations/005_mapeo_institucional.sql`. Si deseas permitir que el
@@ -66,8 +77,14 @@ secretos en las fichas de inventario.
   paginar; las características técnicas se guardan en `componentes`. CPU,
   monitor y periféricos son activos independientes asociados desde el detalle.
 - La importación CSV usa la plantilla descargable, admite hasta 500 filas y
-  comunica errores por fila. Categorías y códigos de ambiente deben existir
-  previamente.
+  comunica errores por fila. Admite separadores coma, punto y coma o tabulación,
+  codificaciones UTF-8/UTF-16/Windows-1252, y normaliza mayúsculas y tildes al
+  buscar categorías. Categorías y códigos de ambiente deben existir previamente;
+  las columnas vacías finales o faltantes de una fila se toleran.
+- La exportación CSV descarga todos los equipos que coinciden con la búsqueda y
+  filtros actuales, con sus nombres de categoría y código de ambiente. El
+  archivo se genera desde la tabla de equipos en lotes, no solo desde la página
+  visible.
 - Las fotografías se optimizan antes de almacenarse. La migración
   `supabase/migrations/007_fotografias_google_drive.sql` agrega soporte para
   fotos nuevas en Google Drive sin invalidar las rutas ya guardadas en
@@ -87,6 +104,19 @@ secretos en las fichas de inventario.
   el plano correcto.
 - La migración 005 añade la tabla de marcadores y activa los cambios en tiempo
   real para que el mapa refleje traslados de equipos.
+- Para habilitar el historial y formulario de mantenimiento, ejecuta en orden
+  `supabase/migrations/008_modulo_mantenimientos.sql` y
+  `supabase/migrations/009_tecnicos_activos_mantenimiento.sql`. Después
+  despliega la aplicación. Solo los técnicos y administradores activos aparecen
+  como opciones; los nombres de inactivos se conservan para leer el historial.
+- Para habilitar traslados y cambios de responsables con historial, ejecuta
+  `supabase/migrations/010_control_movimientos.sql`. La pantalla Movimientos
+  registra ubicación, posición y responsable anterior y nuevo, motivo, fecha y
+  usuario actor; actualiza la ficha del equipo dentro de la misma transacción.
+  Las asignaciones no se pueden cambiar desde la edición ordinaria del equipo,
+  y la base de datos impide esos cambios si no existe su movimiento asociado.
+  El historial se consulta de forma cronológica y no admite edición o borrado
+  desde el cliente.
 
 ## Verificación
 

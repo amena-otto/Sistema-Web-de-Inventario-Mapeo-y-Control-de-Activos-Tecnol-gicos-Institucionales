@@ -67,3 +67,23 @@ La migración `supabase/migrations/007_fotografias_google_drive.sql` agrega
 `drive_file_id` a `fotografias_equipos` y permite que `ruta_storage` sea nulo
 para fotos almacenadas de forma privada en Google Drive. Las rutas anteriores
 de Supabase Storage permanecen válidas.
+
+La migración `supabase/migrations/008_modulo_mantenimientos.sql` amplía
+`mantenimientos` con los datos de diagnóstico, acciones, resultado,
+componentes reemplazados y próxima revisión. Completa la fecha y el problema de
+los registros previos, agrega índices para historial y filtros, y crea las
+funciones protegidas para registrar una intervención, consultar los nombres
+de técnicos y calcular indicadores. La función de registro actualiza el estado
+operativo del equipo en la misma transacción cuando se indica uno.
+
+La migración `supabase/migrations/009_tecnicos_activos_mantenimiento.sql`
+actualiza la consulta de técnicos para distinguir cuentas activas e inactivas.
+La interfaz solo ofrece técnicos activos para filtrar o elegir, pero conserva
+los nombres históricos de quienes ya no tienen una cuenta activa.
+
+La migración `supabase/migrations/010_control_movimientos.sql` amplía
+`movimientos` con fecha, asignación anterior/nueva y posición anterior/nueva.
+El registro se hace mediante una función transaccional que persiste el historial
+y actualiza ubicación, posición y responsable actuales del equipo. Un trigger
+impide cambiar esos campos por fuera de un movimiento registrado; los clientes
+no tienen permisos para insertar, modificar ni borrar filas del historial.

@@ -214,7 +214,7 @@ begin
       format('update public.mantenimientos set estado = ''en_proceso'' where id = %L', v_mant)));
     v_res := v_res || pg_temp.reg('Técnico actualiza un componente (prueba el trigger de auditoría)', 'PERMITIDO', pg_temp.intentar(v_tecnico,
       format('update public.componentes set marca = ''x'' where id = %L', v_comp)));
-    v_res := v_res || pg_temp.reg('Técnico registra movimientos', 'PERMITIDO', pg_temp.intentar(v_tecnico,
+    v_res := v_res || pg_temp.reg('Técnico NO inserta movimientos directamente', 'BLOQUEADO', pg_temp.intentar(v_tecnico,
       format('insert into public.movimientos (equipo_id, ambiente_origen_id, ambiente_destino_id, motivo, responsable_id) values (%L, %L, %L, ''x'', %L)', v_eq, v_amb2, v_amb1, v_tecnico)));
     v_res := v_res || pg_temp.reg('Consulta NO registra movimientos', 'BLOQUEADO', pg_temp.intentar(v_consulta,
       format('insert into public.movimientos (equipo_id, ambiente_origen_id, ambiente_destino_id, motivo, responsable_id) values (%L, %L, %L, ''x'', %L)', v_eq, v_amb2, v_amb1, v_consulta)));
@@ -222,6 +222,8 @@ begin
       format('update public.movimientos set motivo = ''alterado'' where id = %L', v_mov)));
     v_res := v_res || pg_temp.reg('Nadie borra movimientos', 'BLOQUEADO', pg_temp.intentar(v_admin,
       format('delete from public.movimientos where id = %L', v_mov)));
+    v_res := v_res || pg_temp.reg('Técnico NO cambia ubicación sin movimiento', 'BLOQUEADO', pg_temp.intentar(v_tecnico,
+      format('update public.equipos set ambiente_id = %L where id = %L', v_amb2, v_eq)));
 
     -- 5. PERFILES
     v_res := v_res || pg_temp.reg('Técnico NO se sube de rol', 'BLOQUEADO', pg_temp.intentar(v_tecnico,
@@ -236,10 +238,10 @@ begin
       format('delete from public.profiles where id = %L', v_consulta)));
 
     -- 6. QUIÉN HIZO CADA COSA LO DECIDE EL SERVIDOR
-    v_res := v_res || pg_temp.reg('Movimiento: responsable = usuario autenticado (aunque el navegador mande otro)', v_tecnico::text,
+    v_res := v_res || pg_temp.reg('Movimiento RPC registra al usuario autenticado', v_tecnico::text,
       pg_temp.escribir_y_leer(v_tecnico,
-        format('insert into public.movimientos (id, equipo_id, ambiente_origen_id, ambiente_destino_id, motivo, responsable_id) values (''00000000-0000-0000-0000-0000000000a1'', %L, %L, %L, ''x'', %L)', v_eq, v_amb2, v_amb1, v_admin),
-        'select responsable_id::text from public.movimientos where id = ''00000000-0000-0000-0000-0000000000a1'''));
+        format('select public.registrar_movimiento(%L, %L, %L, current_date, ''prueba-rpc'', ''Prueba'')', v_eq, v_amb2, v_admin),
+        format('select responsable_id::text from public.movimientos where equipo_id = %L and motivo = ''prueba-rpc'' order by created_at desc limit 1', v_eq)));
     v_res := v_res || pg_temp.reg('Equipo: creado_por = usuario autenticado (aunque el navegador mande otro)', v_tecnico::text,
       pg_temp.escribir_y_leer(v_tecnico,
         format('insert into public.equipos (codigo_institucional, categoria_id, ambiente_id, nombre, creado_por) values (''ZZ-EQP-9003'', %L, %L, ''ZZ-ACTOR-TEST'', %L)', v_cat, v_amb1, v_admin),
