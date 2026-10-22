@@ -1,5 +1,6 @@
 
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
+import { createClient } from "npm:@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -8,53 +9,63 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      ...corsHeaders,
+      "Content-Type": "application/json",
+    },
+  });
+}
+
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
 
   if (req.method !== "POST") {
-    return new Response(
-      JSON.stringify({ error: "Método no permitido" }),
-      {
-        status: 405,
-        headers: {
-          ...corsHeaders,
-          "Content-Type": "application/json",
-        },
-      },
-    );
+    return jsonResponse({ error: "Método no permitido" }, 405);
   }
 
   try {
-    const apiKey = Deno.env.get("RESEND_API_KEY");
+    const authorization = req.headers.get("Authorization");
 
-    if (!apiKey) {
-      throw new Error("Falta configurar RESEND_API_KEY en Supabase");
+    if (!authorization?.startsWith("Bearer ")) {
+      return jsonResponse({ error: "Debes iniciar sesión" }, 401);
     }
 
-    const { destinatario } = await req.json();
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const supabaseKey = Deno.env.get("SUPABASE_ANON_KEY");
+    const resendApiKey = Deno.env.get("RESEND_API_KEY");
 
-    if (
-      typeof destinatario !== "string" ||
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(destinatario)
-    ) {
-      return new Response(
-        JSON.stringify({ error: "Destinatario inválido" }),
-        {
-          status: 400,
-          headers: {
-            ...corsHeaders,
-            "Content-Type": "application/json",
-          },
-        },
-      );
+    if (!supabaseUrl || !supabaseKey || !resendApiKey) {
+      console.error("Falta una variable de entorno requerida");
+      return jsonResponse({ error: "Configuración incompleta" }, 500);
     }
+
+    const supabase = createClient(supabaseUrl, supabaseKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      },
+      global: {
+        headers: { Authorization: authorization },
+      },
+    });
+
+    const { data, error } = await supabase.auth.getUser();
+
+    if (error || !data.user?.email) {
+      return jsonResponse({ error: "Sesión no válida" }, 401);
+    }
+
+    const destinatario = data.user.email;
 
     const respuesta = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${resendApiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -63,8 +74,10 @@ serve(async (req: Request) => {
         subject: "Prueba de correo - Sistema de Inventario",
         html: `
           <h2>Prueba de Resend</h2>
-          <p>El envío de correos del sistema de inventario está en proceso de configuración.</p>
-          <p>Este es un mensaje de prueba.</p>
+          <p>Hola,</p>
+          <p>Esta es una prueba del envío de correos
+          del sistema de inventario.</p>
+          <p>Si recibiste este mensaje, la integración básica funciona.</p>
         `,
       }),
     });
@@ -72,48 +85,22 @@ serve(async (req: Request) => {
     const resultado = await respuesta.json();
 
     if (!respuesta.ok) {
-      console.error("Error de Resend:", respuesta.status, resultado);
-
-      return new Response(
-        JSON.stringify({
-          error: "Resend no pudo enviar el correo",
-          detalle: resultado.message ?? "Error del proveedor de correo",
-        }),
-        {
-          status: 502,
-          headers: {
-            ...corsHeaders,
-            "Content-Type": "application/json",
-          },
-        },
+      console.error("Resend rechazó la solicitud:", respuesta.status);
+      return jsonResponse(
+        { error: "No se pudo enviar el correo. Revisa los registros." },
+        502,
       );
     }
 
-    return new Response(
-      JSON.stringify({
-        mensaje: "Solicitud aceptada por Resend",
-        id: resultado.id,
-      }),
-      {
-        status: 200,
-        headers: {
-          ...corsHeaders,
-          "Content-Type": "application/json",
-        },
-      },
-    );
+    return jsonResponse({
+      mensaje: "Resend aceptó la solicitud de envío",
+      id: resultado.id,
+    });
   } catch (error) {
-    console.error("Error en enviar-correo:", error);
-
-    return new Response(
-      JSON.stringify({ error: "No se pudo procesar el envío" }),
-      {
-        status: 500,
-        headers: {
-          ...corsHeaders,
-          "Content-Type": "application/json",
-        },
-      },
+    console.error("Error procesando el envío:", error);
+    return jsonResponse(
+      { error: "Error interno al enviar el correo" },
+      500,
     );
   }
 });
