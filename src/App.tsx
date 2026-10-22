@@ -1,9 +1,7 @@
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom'
-import type { ReactNode } from 'react'
+import { Suspense, lazy, type ReactNode } from 'react'
 import AdminLayout from './layouts/AdminLayout'
 import Dashboard from './pages/dashboard'
-import Equipos from './pages/Equipos'
-import Ubicaciones from './pages/Ubicaciones'
 import Mantenimientos from './pages/Mantenimientos'
 import Movimientos from './pages/Movimientos'
 import Reportes from './pages/Reportes'
@@ -12,6 +10,9 @@ import Login from './pages/Login'
 import RestablecerPassword from './pages/RestablecerPassword'
 import { useAuth } from './hooks/useAuth'
 import { usePermissions, type Permiso } from './hooks/usePermissions'
+
+const Equipos = lazy(() => import('./pages/Equipos'))
+const Ubicaciones = lazy(() => import('./pages/Ubicaciones'))
 
 function RutaProtegida() {
   const { session, perfil, cargando } = useAuth()
@@ -63,8 +64,34 @@ export default function App() {
               element={<RutaPorPermiso permiso="inventario.ver" />}
             >
               <Route path="/" element={<Dashboard />} />
-              <Route path="/equipos" element={<Equipos />} />
-              <Route path="/ubicaciones" element={<Ubicaciones />} />
+              <Route
+                path="/equipos"
+                element={
+                  <Suspense
+                    fallback={
+                      <div className="py-8 text-center text-slate-600">
+                        Cargando inventario...
+                      </div>
+                    }
+                  >
+                    <Equipos />
+                  </Suspense>
+                }
+              />
+              <Route
+                path="/ubicaciones"
+                element={
+                  <Suspense
+                    fallback={
+                      <div className="py-8 text-center text-slate-600">
+                        Cargando ubicaciones...
+                      </div>
+                    }
+                  >
+                    <Ubicaciones />
+                  </Suspense>
+                }
+              />
             </Route>
 
             <Route

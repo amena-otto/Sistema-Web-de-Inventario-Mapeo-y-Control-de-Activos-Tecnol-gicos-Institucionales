@@ -57,13 +57,17 @@ Deno.serve(async (request: Request) => {
   if (
     email.length > 254 ||
     !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
+    !email.endsWith('@ottotonsmann.edu.pe') ||
     nombres.length < 1 ||
     nombres.length > 100 ||
     apellidos.length < 1 ||
     apellidos.length > 100 ||
     !esRol(rol)
   ) {
-    return respuesta({ error: 'Revisa el correo, nombre, apellidos y rol.' }, 400)
+    return respuesta(
+      { error: 'Usa un correo @ottotonsmann.edu.pe y revisa nombres, apellidos y rol.' },
+      400,
+    )
   }
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL')

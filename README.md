@@ -17,6 +17,9 @@ El archivo `.env` está excluido de Git.
 ## Configuración de autenticación
 
 - Habilita el proveedor de correo y contraseña en Supabase Auth.
+- Las invitaciones de usuarios solo aceptan direcciones del dominio
+  `@ottotonsmann.edu.pe`; la regla se valida en la aplicación y en la Edge
+  Function `admin-crear-usuario`.
 - Configura la URL del sitio y las URL de redirección permitidas para el
   entorno; incluye `/restablecer-password` para el enlace de recuperación.
 - Cada cuenta de Auth debe tener un perfil relacionado por el mismo `id`, con
@@ -45,6 +48,45 @@ los estados de cuenta dependen de las funciones y políticas de base de datos.
 
 No se deben guardar contraseñas Wi-Fi, credenciales administrativas ni otros
 secretos en las fichas de inventario.
+
+## Módulos de inventario y mapeo
+
+- En Supabase SQL Editor, ejecuta en orden y una sola vez:
+  `supabase/migrations/004_modulo_inventario.sql` y después
+  `supabase/migrations/005_mapeo_institucional.sql`. Si deseas permitir que el
+  administrador elimine ubicaciones vacías desde la aplicación, ejecuta
+  también `supabase/migrations/006_eliminar_ubicaciones.sql`. La migración 005
+  crea la estructura inicial de pabellones A-D y pisos; también incorpora un
+  laboratorio de cómputo en los pisos 1 y 2 del pabellón C.
+- La migración 004 añade patrimonio, posición, responsable y vencimiento de
+  garantía; habilita el código secuencial `OT-EQP-000001` y el estado
+  `en_almacen`. La baja es lógica y está reservada al administrador. El código
+  institucional no se edita ni cambia al trasladar un equipo.
+- En Equipos se pueden registrar/editar activos, consultar detalle, filtrar y
+  paginar; las características técnicas se guardan en `componentes`. CPU,
+  monitor y periféricos son activos independientes asociados desde el detalle.
+- La importación CSV usa la plantilla descargable, admite hasta 500 filas y
+  comunica errores por fila. Categorías y códigos de ambiente deben existir
+  previamente.
+- Las fotografías se optimizan antes de almacenarse. La migración
+  `supabase/migrations/007_fotografias_google_drive.sql` agrega soporte para
+  fotos nuevas en Google Drive sin invalidar las rutas ya guardadas en
+  Supabase Storage. Configura `GOOGLE_SERVICE_ACCOUNT_JSON` y
+  `GOOGLE_DRIVE_FOLDER_ID` como secretos de Edge Functions; despliega
+  `supabase/functions/fotografias-drive` y concede a la cuenta de servicio
+  acceso de carga a la carpeta de Drive. La función valida la sesión y el rol
+  antes de cargar o servir fotos; las credenciales de Google permanecen en el
+  servidor.
+- Ubicaciones permite administrar pabellones, pisos y ambientes, corregir sus
+  datos y eliminar solo los que no tengan dependencias. Los pisos con ambientes
+  y los ambientes con equipos deben vaciarse o reasignarse antes de borrarlos.
+  Los equipos se consultan por jerarquía y se resumen por estado.
+  Los planos de piso se optimizan y guardan en un bucket privado. Los
+  marcadores usan coordenadas normalizadas ligadas al equipo; al mover un
+  activo a otro piso se elimina su marcador antiguo para volver a ubicarlo en
+  el plano correcto.
+- La migración 005 añade la tabla de marcadores y activa los cambios en tiempo
+  real para que el mapa refleje traslados de equipos.
 
 ## Verificación
 

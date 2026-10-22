@@ -34,9 +34,7 @@ export default function Usuarios() {
   const [aviso, setAviso] = useState('')
   const [busqueda, setBusqueda] = useState('')
   const [filtroRol, setFiltroRol] = useState<'todos' | Rol>('todos')
-  const [filtroEstado, setFiltroEstado] = useState<
-    'todos' | 'activos' | 'inactivos'
-  >('todos')
+  const [mostrarAntiguos, setMostrarAntiguos] = useState(false)
   const [editandoId, setEditandoId] = useState<string | null>(null)
   const [nombres, setNombres] = useState('')
   const [apellidos, setApellidos] = useState('')
@@ -74,13 +72,10 @@ export default function Usuarios() {
       const coincideTexto =
         !texto || `${u.nombres} ${u.apellidos}`.toLowerCase().includes(texto)
       const coincideRol = filtroRol === 'todos' || u.rol === filtroRol
-      const coincideEstado =
-        filtroEstado === 'todos' ||
-        (filtroEstado === 'activos' ? u.activo : !u.activo)
 
-      return coincideTexto && coincideRol && coincideEstado
+      return u.activo !== mostrarAntiguos && coincideTexto && coincideRol
     })
-  }, [usuarios, busqueda, filtroRol, filtroEstado])
+  }, [usuarios, busqueda, filtroRol, mostrarAntiguos])
 
   async function aplicar(id: string, cambios: CambiosPerfil, textoOk: string) {
     setError('')
@@ -106,10 +101,15 @@ export default function Usuarios() {
     event.preventDefault()
     setError('')
     setAviso('')
+    const email = nuevoEmail.trim().toLowerCase()
+    if (!email.endsWith('@ottotonsmann.edu.pe')) {
+      setError('Solo se permiten correos @ottotonsmann.edu.pe.')
+      return
+    }
     setCreando(true)
 
     const nuevo: NuevoUsuario = {
-      email: nuevoEmail.trim(),
+      email,
       nombres: nuevosNombres.trim(),
       apellidos: nuevosApellidos.trim(),
       rol: nuevoRol,
@@ -177,7 +177,8 @@ export default function Usuarios() {
       <h2 className="text-2xl font-semibold">Usuarios</h2>
       <p className="mt-1 text-sm text-slate-600">
         Invita al personal por correo. La persona recibirá un enlace para
-        establecer su contraseña.
+        establecer su contraseña. Solo se aceptan correos
+        {' '}@ottotonsmann.edu.pe.
       </p>
 
       <form
@@ -191,9 +192,10 @@ export default function Usuarios() {
             autoComplete="email"
             required
             maxLength={254}
+            pattern="[A-Za-z0-9._%+-]+@ottotonsmann[.]edu[.]pe"
             value={nuevoEmail}
-            onChange={(event) => setNuevoEmail(event.target.value)}
-            placeholder="Correo institucional"
+            onChange={(event) => setNuevoEmail(event.target.value.toLowerCase())}
+            placeholder="usuario@ottotonsmann.edu.pe"
             aria-label="Correo institucional"
             className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
           />
@@ -235,7 +237,21 @@ export default function Usuarios() {
         </div>
       </form>
 
-      <div className="mt-4 flex flex-wrap gap-3">
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={() => setMostrarAntiguos((actual) => !actual)}
+          className={`rounded-lg px-3 py-2 text-sm font-semibold ${
+            mostrarAntiguos
+              ? 'bg-slate-700 text-white'
+              : 'border border-slate-300 bg-white text-slate-700'
+          }`}
+        >
+          {mostrarAntiguos ? 'Volver a usuarios activos' : 'Usuarios antiguos'}
+          {mostrarAntiguos
+            ? ''
+            : ` (${usuarios.filter((usuario) => !usuario.activo).length})`}
+        </button>
         <input
           type="search"
           value={busqueda}
@@ -253,18 +269,13 @@ export default function Usuarios() {
           <option value="tecnico">Técnico</option>
           <option value="consulta">Consulta</option>
         </select>
-        <select
-          value={filtroEstado}
-          onChange={(e) =>
-            setFiltroEstado(e.target.value as 'todos' | 'activos' | 'inactivos')
-          }
-          className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-        >
-          <option value="todos">Todos los estados</option>
-          <option value="activos">Activos</option>
-          <option value="inactivos">Inactivos</option>
-        </select>
       </div>
+
+      <p className="mt-3 text-sm text-slate-500">
+        {mostrarAntiguos
+          ? 'Mostrando cuentas desactivadas. Puedes activarlas desde esta lista.'
+          : 'Mostrando únicamente cuentas activas.'}
+      </p>
 
       {error && (
         <p role="alert" className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">

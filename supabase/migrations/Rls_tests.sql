@@ -95,7 +95,8 @@ declare
   v_tecnico  uuid;
   v_consulta uuid;
   v_pab uuid; v_piso uuid; v_amb1 uuid; v_amb2 uuid; v_cat uuid;
-  v_eq uuid; v_mant uuid; v_comp uuid; v_mov uuid;
+  v_pab_sin_dependencias uuid;
+  v_eq uuid; v_eq_rel uuid; v_mant uuid; v_comp uuid; v_mov uuid;
   v_res jsonb := '[]'::jsonb;
   v_hay_bucket boolean;
 begin
@@ -113,12 +114,17 @@ begin
   begin
     -- Datos de prueba (se revierten al final)
     insert into public.pabellones (nombre) values ('ZZ-PRUEBA') returning id into v_pab;
+    insert into public.pabellones (nombre)
+      values ('ZZ-PRUEBA-ELIMINAR-UBICACION')
+      returning id into v_pab_sin_dependencias;
     insert into public.pisos (pabellon_id, nombre, numero) values (v_pab, 'ZZ-PISO', 1) returning id into v_piso;
     insert into public.ambientes (piso_id, codigo, nombre, tipo) values (v_piso, 'ZZ1', 'ZZ Aula 1', 'aula') returning id into v_amb1;
     insert into public.ambientes (piso_id, codigo, nombre, tipo) values (v_piso, 'ZZ2', 'ZZ Aula 2', 'aula') returning id into v_amb2;
     insert into public.categorias_equipos (nombre) values ('ZZ-CATEGORIA') returning id into v_cat;
     insert into public.equipos (codigo_institucional, categoria_id, ambiente_id, nombre)
       values ('ZZ-EQP-0001', v_cat, v_amb1, 'Equipo de prueba') returning id into v_eq;
+    insert into public.equipos (codigo_institucional, categoria_id, ambiente_id, nombre)
+      values ('ZZ-EQP-0002', v_cat, v_amb1, 'Equipo relacionado de prueba') returning id into v_eq_rel;
     insert into public.mantenimientos (equipo_id, tipo, descripcion) values (v_eq, 'preventivo', 'prueba') returning id into v_mant;
     insert into public.componentes (equipo_id, tipo) values (v_eq, 'RAM') returning id into v_comp;
     insert into public.movimientos (equipo_id, ambiente_origen_id, ambiente_destino_id, motivo, responsable_id)
@@ -152,8 +158,28 @@ begin
       format('insert into public.equipos (codigo_institucional, categoria_id, ambiente_id, nombre) values (''ZZ-EQP-9002'', %L, %L, ''x'')', v_cat, v_amb1)));
     v_res := v_res || pg_temp.reg('Técnico edita equipos', 'PERMITIDO', pg_temp.intentar(v_tecnico,
       format('update public.equipos set nombre = ''editado'' where id = %L', v_eq)));
+    v_res := v_res || pg_temp.reg('Técnico cambia estado operativo a almacén', 'PERMITIDO', pg_temp.intentar(v_tecnico,
+      format('update public.equipos set estado_operativo = ''en_almacen'' where id = %L', v_eq)));
     v_res := v_res || pg_temp.reg('Consulta NO edita equipos', 'BLOQUEADO', pg_temp.intentar(v_consulta,
       format('update public.equipos set nombre = ''editado'' where id = %L', v_eq)));
+    v_res := v_res || pg_temp.reg('Técnico registra componentes', 'PERMITIDO', pg_temp.intentar(v_tecnico,
+      format('insert into public.componentes (equipo_id, tipo) values (%L, ''SSD'')', v_eq)));
+    v_res := v_res || pg_temp.reg('Consulta NO registra componentes', 'BLOQUEADO', pg_temp.intentar(v_consulta,
+      format('insert into public.componentes (equipo_id, tipo) values (%L, ''SSD'')', v_eq)));
+    v_res := v_res || pg_temp.reg('Técnico relaciona equipos', 'PERMITIDO', pg_temp.intentar(v_tecnico,
+      format('insert into public.relaciones_equipos (equipo_principal_id, equipo_relacionado_id, tipo_relacion) values (%L, %L, ''periferico'')', v_eq, v_eq_rel)));
+    v_res := v_res || pg_temp.reg('Consulta NO relaciona equipos', 'BLOQUEADO', pg_temp.intentar(v_consulta,
+      format('insert into public.relaciones_equipos (equipo_principal_id, equipo_relacionado_id, tipo_relacion) values (%L, %L, ''periferico'')', v_eq, v_eq_rel)));
+    v_res := v_res || pg_temp.reg('Técnico coloca marcador de equipo en el plano', 'PERMITIDO', pg_temp.intentar(v_tecnico,
+      format('insert into public.marcadores_mapa (equipo_id, piso_id, x, y) values (%L, %L, 25, 50)', v_eq, v_piso)));
+    v_res := v_res || pg_temp.reg('Consulta NO coloca marcadores', 'BLOQUEADO', pg_temp.intentar(v_consulta,
+      format('insert into public.marcadores_mapa (equipo_id, piso_id, x, y) values (%L, %L, 70, 70)', v_eq_rel, v_piso)));
+    v_res := v_res || pg_temp.reg('Marcador NO puede exceder coordenadas del plano', 'BLOQUEADO', pg_temp.intentar(v_admin,
+      format('insert into public.marcadores_mapa (equipo_id, piso_id, x, y) values (%L, %L, 120, 50)', v_eq_rel, v_piso)));
+    v_res := v_res || pg_temp.reg('Técnico registra metadatos de fotografías', 'PERMITIDO', pg_temp.intentar(v_tecnico,
+      format('insert into public.fotografias_equipos (equipo_id, ruta_storage) values (%L, %L)', v_eq, 'equipos/' || v_eq || '/metadata-test.webp')));
+    v_res := v_res || pg_temp.reg('Consulta NO registra metadatos de fotografías', 'BLOQUEADO', pg_temp.intentar(v_consulta,
+      format('insert into public.fotografias_equipos (equipo_id, ruta_storage) values (%L, %L)', v_eq, 'equipos/' || v_eq || '/metadata-test.webp')));
     v_res := v_res || pg_temp.reg('Técnico NO da de baja equipos', 'BLOQUEADO', pg_temp.intentar(v_tecnico,
       format('update public.equipos set situacion = ''baja'', deleted_at = now() where id = %L', v_eq)));
     v_res := v_res || pg_temp.reg('Admin da de baja equipos', 'PERMITIDO', pg_temp.intentar(v_admin,
@@ -173,6 +199,10 @@ begin
       format('update public.ambientes set nombre = ''x'' where id = %L', v_amb1)));
     v_res := v_res || pg_temp.reg('Admin edita ambientes', 'PERMITIDO', pg_temp.intentar(v_admin,
       format('update public.ambientes set nombre = ''x'' where id = %L', v_amb1)));
+    v_res := v_res || pg_temp.reg('Técnico NO elimina ubicaciones', 'BLOQUEADO', pg_temp.intentar(v_tecnico,
+      format('delete from public.pabellones where id = %L', v_pab_sin_dependencias)));
+    v_res := v_res || pg_temp.reg('Admin elimina pabellones sin dependencias', 'PERMITIDO', pg_temp.intentar(v_admin,
+      format('delete from public.pabellones where id = %L', v_pab_sin_dependencias)));
     v_res := v_res || pg_temp.reg('Técnico NO crea categorías', 'BLOQUEADO', pg_temp.intentar(v_tecnico, 'insert into public.categorias_equipos (nombre) values (''ZZ-C2'')'));
 
     -- 4. MANTENIMIENTOS, COMPONENTES Y MOVIMIENTOS
@@ -212,8 +242,13 @@ begin
         'select responsable_id::text from public.movimientos where id = ''00000000-0000-0000-0000-0000000000a1'''));
     v_res := v_res || pg_temp.reg('Equipo: creado_por = usuario autenticado (aunque el navegador mande otro)', v_tecnico::text,
       pg_temp.escribir_y_leer(v_tecnico,
-        format('insert into public.equipos (codigo_institucional, categoria_id, ambiente_id, nombre, creado_por) values (''ZZ-EQP-9003'', %L, %L, ''x'', %L)', v_cat, v_amb1, v_admin),
-        'select creado_por::text from public.equipos where codigo_institucional = ''ZZ-EQP-9003'''));
+        format('insert into public.equipos (codigo_institucional, categoria_id, ambiente_id, nombre, creado_por) values (''ZZ-EQP-9003'', %L, %L, ''ZZ-ACTOR-TEST'', %L)', v_cat, v_amb1, v_admin),
+        'select creado_por::text from public.equipos where nombre = ''ZZ-ACTOR-TEST'''));
+    v_res := v_res || pg_temp.reg('Equipo: código institucional generado por servidor',
+      'true',
+      (pg_temp.escribir_y_leer(v_tecnico,
+        format('insert into public.equipos (codigo_institucional, categoria_id, ambiente_id, nombre) values (''ZZ-EQP-MANUAL'', %L, %L, ''ZZ-CODE-TEST'')', v_cat, v_amb1),
+        'select codigo_institucional from public.equipos where nombre = ''ZZ-CODE-TEST''')) ~ '^OT-EQP-[0-9]{6,}$')::text);
     v_res := v_res || pg_temp.reg('Auditoría registra al usuario real del cambio', v_tecnico::text,
       pg_temp.escribir_y_leer(v_tecnico,
         format('update public.mantenimientos set estado = ''completado'' where id = %L', v_mant),
