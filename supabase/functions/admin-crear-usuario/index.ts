@@ -117,6 +117,15 @@ Deno.serve(async (request: Request) => {
 
   if (invitationError || !invitation.user) {
     console.error('No se pudo enviar la invitación:', invitationError?.message)
+    if (invitationError?.message.toLowerCase().includes('email rate limit exceeded')) {
+      return respuesta(
+        {
+          error:
+            'Supabase alcanzó el límite de envío de invitaciones por correo. Espera antes de volver a intentarlo o configura un proveedor SMTP propio en Authentication → SMTP Settings.',
+        },
+        429,
+      )
+    }
     return respuesta(
       { error: invitationError?.message ?? 'No se pudo crear la cuenta.' },
       400,

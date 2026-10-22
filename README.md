@@ -22,18 +22,48 @@ El archivo `.env` está excluido de Git.
   Edge Function `admin-crear-usuario`.
 - Configura la URL del sitio y las URL de redirección permitidas para el
   entorno; incluye `/restablecer-password` para el enlace de recuperación.
+  Para producción, `Site URL` debe ser el dominio público de Cloudflare Pages
+  (o el dominio personalizado), nunca `localhost`. Añade también la URL exacta
+  `https://TU-DOMINIO/restablecer-password` a `Redirect URLs`.
 - Cada cuenta de Auth debe tener un perfil relacionado por el mismo `id`, con
   un rol válido (`admin`, `tecnico` o `consulta`) y `activo = true`.
+- La tabla de usuarios muestra los correos de inicio de sesión mediante la
+  Edge Function `admin-listar-usuarios`. Al editar una cuenta, el administrador
+  puede cambiar el correo con `admin-actualizar-correo`; el cambio se aplica
+  inmediatamente en Supabase Auth y la persona deberá usar el nuevo correo
+  para iniciar sesión. Despliega ambas funciones con
+  `npx supabase functions deploy admin-listar-usuarios` y
+  `npx supabase functions deploy admin-actualizar-correo`.
 - El administrador puede invitar personal desde la pantalla de usuarios. La
   función `admin-crear-usuario` verifica la sesión y el perfil de administrador
   activo en el servidor antes de crear la cuenta. Configura el secreto
   `APP_URL` de la Edge Function con el origen público de la aplicación y agrega
   `${APP_URL}/restablecer-password` a las URL de redirección permitidas de Auth.
+  Si Supabase devuelve `email rate limit exceeded`, espera el periodo de
+  enfriamiento o configura un proveedor SMTP propio en
+  **Authentication → SMTP Settings**; no se puede aumentar ese límite desde
+  el frontend ni desplegando la función en Cloudflare.
+- Desde la edición de un usuario, el administrador puede enviar un enlace de
+  restablecimiento al correo de la cuenta. Despliega
+  `supabase/functions/admin-restablecer-password` con
+  `supabase functions deploy admin-restablecer-password`; la función verifica
+  en el servidor que quien solicita sea un administrador activo. El enlace
+  necesita que `${APP_URL}/restablecer-password` esté permitida en Auth.
 - Las cuentas inactivas solo se eliminan desde la lista de usuarios antiguos,
   después de confirmarlo. Despliega también
   `supabase/functions/admin-eliminar-usuario`; la función solo acepta
   administradores activos y rechaza cuentas que aún estén activas. Despliega
-  con `supabase functions deploy admin-eliminar-usuario`.
+  con `npx supabase functions deploy admin-eliminar-usuario`. Las cuentas con
+  referencias históricas no se borran para no perder la trazabilidad; la
+  función informa ese caso y conserva la cuenta desactivada.
+- Configura el secreto `APP_URL` de las funciones de invitación y
+  restablecimiento como el origen publicado, por ejemplo
+  `https://TU-SITIO.pages.dev` (sin `localhost` ni `/restablecer-password`).
+  Puedes actualizarlo desde **Supabase Dashboard → Edge Functions → Secrets**
+  o con `npx supabase secrets set APP_URL=https://TU-SITIO.pages.dev`.
+  Supabase Auth envía el correo usando su proveedor SMTP configurado; para
+  producción se recomienda configurar un SMTP propio en **Authentication →
+  SMTP Settings**. No se necesita una API de correo en el frontend.
 - La Edge Function usa `SUPABASE_SERVICE_ROLE_KEY` exclusivamente en el
   servidor. Nunca agregues esa clave al frontend ni a variables `VITE_*`.
   El invitado recibe un correo para establecer su contraseña y queda activo
