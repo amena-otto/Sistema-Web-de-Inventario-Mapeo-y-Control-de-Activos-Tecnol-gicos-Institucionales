@@ -1,161 +1,138 @@
 import { createClient } from 'npm:@supabase/supabase-js@2'
 
-const driveScope = 'https://www.googleapis.com/auth/drive'
+
 const googleTokenUrl = 'https://oauth2.googleapis.com/token'
 
-type ServiceAccountCredentials = {
-  type?: string
-  client_email?: string
-  private_key?: string
-  private_key_id?: string
+function base64ToBytes(value: string): Uint8Array {
+  const binary = atob(value)
+  return Uint8Array.from(binary, (char) => char.charCodeAt(0))
 }
 
-function esObjeto(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}
+async function descifrarRefreshToken(
+  encryptedValue: string,
+  encodedKey: string,
+): Promise<string> {
+  const parts = encryptedValue.split(':')
 
-function encodeBase64Url(value: Uint8Array | string): string {
-  const bytes =
-    typeof value === 'string' ? new TextEncoder().encode(value) : value
-  let binary = ''
-  for (const byte of bytes) binary += String.fromCharCode(byte)
-  return btoa(binary).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_')
-}
+  if (parts.length !== 2) {
+    throw new Error('El token de Google tiene un formato cifrado inválido.')
+  }
 
-function decodePrivateKey(pem: string): Uint8Array {
-  const normalized = pem.replace(/\\r\\n|\\n|\\r/g, '\n').trim()
-  if (
-    !normalized.startsWith('-----BEGIN PRIVATE KEY-----') ||
-    !normalized.endsWith('-----END PRIVATE KEY-----')
-  ) {
+  const keyBytes = base64ToBytes(encodedKey)
+
+  if (keyBytes.length !== 32) {
     throw new Error(
-      'La clave privada no tiene el formato esperado. Usa el JSON de clave de una cuenta de servicio de Google.',
-    )
-  }
-  const contents = normalized
-    .replace('-----BEGIN PRIVATE KEY-----', '')
-    .replace('-----END PRIVATE KEY-----', '')
-    .replace(/\s/g, '')
-  if (!contents) throw new Error('La clave privada de Google está vacía.')
-  const binary = atob(contents)
-  return Uint8Array.from(binary, (character) => character.charCodeAt(0))
-}
-
-async function mensajeErrorOAuth(response: Response): Promise<string> {
-  let code = ''
-  let description = ''
-  try {
-    const body: unknown = await response.json()
-    if (esObjeto(body)) {
-      if (typeof body.error === 'string') code = body.error
-      if (typeof body.error_description === 'string') {
-        description = body.error_description
-      }
-    }
-  } catch {
-    description = 'Google devolvió una respuesta que no se pudo interpretar.'
-  }
-
-  const detalle = [
-    `Google OAuth respondió HTTP ${response.status}`,
-    code,
-    description,
-  ]
-    .filter(Boolean)
-    .join(': ')
-  console.error(detalle)
-  return detalle
-}
-
-async function getGoogleAccessToken(): Promise<string> {
-  const secret = Deno.env.get('GOOGLE_SERVICE_ACCOUNT_JSON')
-  if (!secret) {
-    throw new Error('Falta el secreto GOOGLE_SERVICE_ACCOUNT_JSON en Supabase.')
-  }
-
-  let credentials: ServiceAccountCredentials
-  try {
-    let parsed: unknown = JSON.parse(secret.trim())
-    if (typeof parsed === 'string') parsed = JSON.parse(parsed)
-    if (!esObjeto(parsed)) throw new Error('El contenido no es un objeto JSON.')
-
-    credentials = {
-      type: typeof parsed.type === 'string' ? parsed.type : undefined,
-      client_email:
-        typeof parsed.client_email === 'string' ? parsed.client_email : undefined,
-      private_key:
-        typeof parsed.private_key === 'string' ? parsed.private_key : undefined,
-      private_key_id:
-        typeof parsed.private_key_id === 'string'
-          ? parsed.private_key_id
-          : undefined,
-    }
-  } catch {
-    throw new Error(
-      'GOOGLE_SERVICE_ACCOUNT_JSON debe contener el JSON completo descargado de una clave de cuenta de servicio de Google Cloud, sin texto adicional.',
-    )
-  }
-  if (
-    credentials.type !== 'service_account' ||
-    !credentials.client_email?.endsWith('.iam.gserviceaccount.com') ||
-    !credentials.private_key
-  ) {
-    throw new Error(
-      'El secreto debe ser una clave JSON de tipo service_account con client_email y private_key. No uses un OAuth client ID ni una API key.',
+      'GOOGLE_TOKEN_ENCRYPTION_KEY debe ser una clave Base64 de 32 bytes.',
     )
   }
 
-  const now = Math.floor(Date.now() / 1000)
-  const header = {
-    alg: 'RS256',
-    typ: 'JWT',
-    ...(credentials.private_key_id ? { kid: credentials.private_key_id } : {}),
+  const key = await crypto.subtle.importKey(
+    'raw',
+    keyBytes,
+    { name: 'AES-GCM' },
+    false,
+    ['decrypt'],
+  )
+
+  const iv = base64ToBytes(parts[0])
+  const encryptedBytes = base64ToBytes(parts[1])
+
+  if (iv.length !== 12) {
+    throw new Error('El IV del token de Google tiene un formato inválido.')
   }
-  const claims = {
-    iss: credentials.client_email,
-    scope: driveScope,
-    aud: googleTokenUrl,
-    iat: now,
-    exp: now + 3600,
+
+  const decrypted = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv },
+    key,
+    encryptedBytes,
+  )
+
+  return new TextDecoder().decode(decrypted)
+}
+
+async function getGoogleAccessToken(
+  adminClient: ReturnType<typeof createClient>,
+): Promise<string> {
+  const clientId = Deno.env.get('GOOGLE_OAUTH_CLIENT_ID')
+  const clientSecret = Deno.env.get('GOOGLE_OAUTH_CLIENT_SECRET')
+  const encryptionKey = Deno.env.get('GOOGLE_TOKEN_ENCRYPTION_KEY')
+
+  if (!clientId || !clientSecret || !encryptionKey) {
+    throw new Error(
+      'Faltan los secretos OAuth necesarios para conectar con Google Drive.',
+    )
   }
-  const unsignedToken = `${encodeBase64Url(JSON.stringify(header))}.${encodeBase64Url(JSON.stringify(claims))}`
-  let privateKey: CryptoKey
+
+  const { data, error } = await adminClient
+    .from('google_drive_oauth_tokens')
+    .select('encrypted_refresh_token')
+    .eq('id', 1)
+    .maybeSingle()
+
+  if (error) {
+    console.error('Error consultando el token OAuth:', error.message)
+    throw new Error('No se pudo recuperar la autorización de Google Drive.')
+  }
+
+  if (!data?.encrypted_refresh_token) {
+    throw new Error(
+      'No hay un token OAuth guardado. Debes autorizar Google Drive nuevamente.',
+    )
+  }
+
+  let refreshToken: string
+
   try {
-    privateKey = await crypto.subtle.importKey(
-      'pkcs8',
-      decodePrivateKey(credentials.private_key),
-      { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-      false,
-      ['sign'],
+    refreshToken = await descifrarRefreshToken(
+      data.encrypted_refresh_token,
+      encryptionKey,
     )
   } catch (error) {
-    if (error instanceof Error && error.message.includes('formato esperado')) {
-      throw error
-    }
-    throw new Error(
-      'No se pudo leer private_key. Vuelve a descargar una clave JSON nueva para la cuenta de servicio de Google Cloud y actualiza el secreto.',
-      { cause: error },
+    console.error(
+      'No se pudo descifrar el token OAuth:',
+      error instanceof Error ? error.message : 'Error desconocido',
     )
+    throw new Error('No se pudo descifrar la autorización de Google Drive.')
   }
-  const signature = await crypto.subtle.sign(
-    'RSASSA-PKCS1-v1_5',
-    privateKey,
-    new TextEncoder().encode(unsignedToken),
-  )
-  const assertion = `${unsignedToken}.${encodeBase64Url(new Uint8Array(signature))}`
+
   const response = await fetch(googleTokenUrl, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
     body: new URLSearchParams({
-      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-      assertion,
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
+      grant_type: 'refresh_token',
     }),
   })
+
   if (!response.ok) {
-    throw new Error(await mensajeErrorOAuth(response))
+    let googleError = 'Google rechazó la renovación del token.'
+
+    try {
+      const result = await response.json()
+      if (typeof result.error === 'string') {
+        googleError = result.error
+      }
+    } catch {
+      // No registrar credenciales ni tokens.
+    }
+
+    console.error('Error renovando el token OAuth:', googleError)
+
+    if (googleError === 'invalid_grant') {
+      throw new Error(
+        'La autorización de Google Drive expiró o fue revocada. Debes autorizarla nuevamente.',
+      )
+    }
+
+    throw new Error('Google no pudo renovar el acceso a Drive.')
   }
 
   const result: unknown = await response.json()
+
   if (
     typeof result !== 'object' ||
     result === null ||
@@ -164,8 +141,10 @@ async function getGoogleAccessToken(): Promise<string> {
   ) {
     throw new Error('Google no devolvió un token de acceso válido.')
   }
+
   return result.access_token
 }
+
 
 async function mensajeErrorGoogle(response: Response): Promise<string> {
   const responseText = await response.text()
@@ -435,7 +414,7 @@ async function subirFotografia(request: Request) {
     throw new Error('El almacenamiento de fotografías no está configurado.')
   }
 
-  const accessToken = await getGoogleAccessToken()
+  const accessToken = await getGoogleAccessToken(adminClient)
   await validarCarpetaDrive(accessToken, folderId)
   const driveFileId = await subirArchivoDrive(accessToken, folderId, fileValue)
   const { error: registroError } = await adminClient
@@ -477,10 +456,12 @@ async function obtenerFotografia(request: Request) {
     return respuestaJson({ error: 'No se encontró la fotografía de Drive.' }, 404)
   }
 
-  const driveResponse = await descargarArchivoDrive(
-    await getGoogleAccessToken(),
-    fotografia.drive_file_id,
-  )
+ const accessToken = await getGoogleAccessToken(adminClient)
+
+const driveResponse = await descargarArchivoDrive(
+  accessToken,
+  fotografia.drive_file_id,
+)
   const contentType = driveResponse.headers.get('Content-Type')?.split(';')[0]
   if (!contentType || !tiposImagen.has(contentType)) {
     throw new Error('El archivo vinculado no es una imagen admitida.')
