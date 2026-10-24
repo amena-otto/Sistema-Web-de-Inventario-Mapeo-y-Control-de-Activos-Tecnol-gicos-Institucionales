@@ -1,0 +1,64 @@
+name: Encrypted PostgreSQL backup
+
+on:
+  schedule:
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: postgres-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Install PostgreSQL and S3 tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client awscli gnupg
+
+      - name: Create, verify, encrypt, and upload backup
+        shell: bash
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          BACKUP_ENCRYPTION_PASSPHRASE: ${{ secrets.BACKUP_ENCRYPTION_PASSPHRASE }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          set -euo pipefail
+
+          : "${SUPABASE_DB_URL:?Add SUPABASE_DB_URL to GitHub Actions secrets}"
+          : "${R2_ACCOUNT_ID:?Add R2_ACCOUNT_ID to GitHub Actions secrets}"
+          : "${R2_BUCKET_NAME:?Add R2_BUCKET_NAME to GitHub Actions secrets}"
+          : "${AWS_ACCESS_KEY_ID:?Add R2_ACCESS_KEY_ID to GitHub Actions secrets}"
+          : "${AWS_SECRET_ACCESS_KEY:?Add R2_SECRET_ACCESS_KEY to GitHub Actions secrets}"
+          : "${BACKUP_ENCRYPTION_PASSPHRASE:?Add BACKUP_ENCRYPTION_PASSPHRASE to GitHub Actions secrets}"
+
+          workdir="$(mktemp -d "${RUNNER_TEMP}/postgres-backup.XXXXXX")"
+          dump="${workdir}/database.dump"
+          restore_list="${workdir}/restore-list.txt"
+          encrypted="${workdir}/database.dump.gpg"
+          checksum="${workdir}/database.dump.gpg.sha256"
+          trap 'rm -f -- "$dump" "$restore_list" "$encrypted" "$checksum"; rmdir -- "$workdir"' EXIT
+
+          pg_dump --dbname="$SUPABASE_DB_URL" --format=custom --file="$dump"
+          pg_restore --list "$dump" > "$restore_list"
+          printf '%s' "$BACKUP_ENCRYPTION_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback \
+            --passphrase-fd 0 \
+            --symmetric --cipher-algo AES256 \
+            --output "$encrypted" "$dump"
+          sha256sum "$encrypted" | awk '{print $1}' > "$checksum"
+
+          object_key="postgres/$(date -u +%Y/%m/%d)/inventory-$(date -u +%Y%m%dT%H%M%SZ).dump.gpg"
+          endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          aws --endpoint-url "$endpoint" s3 cp "$encrypted" "s3://${R2_BUCKET_NAME}/${object_key}" --only-show-errors
+          aws --endpoint-url "$endpoint" s3 cp "$checksum" "s3://${R2_BUCKET_NAME}/${object_key}.sha256" --only-show-errors
+          aws --endpoint-url "$endpoint" s3api head-object --bucket "$R2_BUCKET_NAME" --key "$object_key" > /dev/null

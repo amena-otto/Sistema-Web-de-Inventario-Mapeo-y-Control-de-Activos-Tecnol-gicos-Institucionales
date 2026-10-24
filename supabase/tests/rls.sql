@@ -1,5 +1,6 @@
--- PRUEBAS DE RLS (no deja datos: todo se revierte al terminar)
--- Ejecuta el archivo completo en el SQL Editor. El resultado es una tabla;
+-- PRUEBAS RLS PARA STAGING (no ejecutar en producción)
+-- Requiere un usuario activo por rol: admin, tecnico y consulta.
+-- Todo se revierte al terminar. Ejecuta el archivo completo en el SQL Editor. El resultado es una tabla;
 -- las filas con resultado FALLA aparecen primero.
 
 create or replace function pg_temp.intentar(p_uid uuid, p_sql text, p_rol text default 'authenticated')

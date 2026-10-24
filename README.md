@@ -184,3 +184,5 @@ secretos en las fichas de inventario.
 
 - `npm run build`: comprueba TypeScript y genera la aplicación de producción.
 - `npm run lint`: ejecuta ESLint.
+- La matriz funcional, las pruebas RLS y la configuración del respaldo/restauración se describen en [Fase 11](./documentacion/fase-11-pruebas-seguridad-respaldos.md).
+- GitHub Actions ejecuta lint y build; las pruebas de roles y restauración requieren un entorno Supabase de staging.
