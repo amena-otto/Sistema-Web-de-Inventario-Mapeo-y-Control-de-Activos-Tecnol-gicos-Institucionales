@@ -228,6 +228,8 @@ export async function listarEquiposParaExportar(filtros: {
   estado: string
   categoriaId: string
   ambienteId: string
+  ambienteIds?: string[]
+  sinUbicacion?: boolean
 }): Promise<{
   equipos: Equipo[]
   categorias: Categoria[]
@@ -260,11 +262,22 @@ export async function listarEquiposParaExportar(filtros: {
       consulta = consulta.eq('situacion', 'baja')
     } else if (filtros.estado === 'archivado') {
       consulta = consulta.eq('situacion', 'archivado')
+    } else if (filtros.estado === 'activo') {
+      consulta = consulta.eq('situacion', 'activo')
     } else if (filtros.estado) {
       consulta = consulta.eq('estado_operativo', filtros.estado).eq('situacion', 'activo')
     }
     if (filtros.categoriaId) consulta = consulta.eq('categoria_id', filtros.categoriaId)
-    if (filtros.ambienteId) consulta = consulta.eq('ambiente_id', filtros.ambienteId)
+    if (filtros.ambienteId) {
+      consulta = consulta.eq('ambiente_id', filtros.ambienteId)
+    } else if (filtros.sinUbicacion) {
+      consulta = consulta.is('ambiente_id', null)
+    } else if (filtros.ambienteIds) {
+      if (!filtros.ambienteIds.length) {
+        return { equipos: [], categorias: [], ambientes: [] }
+      }
+      consulta = consulta.in('ambiente_id', filtros.ambienteIds)
+    }
 
     const { data, error } = await consulta
     if (error) throw error
