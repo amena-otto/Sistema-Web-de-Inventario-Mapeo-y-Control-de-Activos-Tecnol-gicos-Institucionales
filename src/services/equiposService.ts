@@ -83,6 +83,7 @@ export type Fotografia = {
   ruta_storage: string | null
   drive_file_id: string | null
   descripcion: string | null
+  tipo: string
 }
 
 export async function cargarCatalogos() {
@@ -151,6 +152,7 @@ export async function listarEquipos({
   estado,
   categoriaId,
   ambienteId,
+  ordenReciente = false,
 }: {
   pagina: number
   porPagina: number
@@ -158,6 +160,7 @@ export async function listarEquipos({
   estado: string
   categoriaId: string
   ambienteId: string
+  ordenReciente?: boolean
 }) {
   let consulta = supabase
     .from('equipos')
@@ -165,6 +168,9 @@ export async function listarEquipos({
       'id, codigo_institucional, categoria_id, ambiente_id, nombre, marca, modelo, numero_serie, codigo_patrimonial, posicion, responsable_id, estado_operativo, situacion, fecha_adquisicion, fecha_garantia, observaciones, created_at, updated_at',
       { count: 'exact' },
     )
+    .order(ordenReciente ? 'created_at' : 'codigo_institucional', {
+      ascending: !ordenReciente,
+    })
     .order('codigo_institucional')
     .range((pagina - 1) * porPagina, pagina * porPagina - 1)
 
@@ -386,9 +392,10 @@ export async function obtenerDetalleEquipo(
       .or(`equipo_principal_id.eq.${id},equipo_relacionado_id.eq.${id}`),
     supabase
       .from('fotografias_equipos')
-      .select('id, ruta_storage, drive_file_id, descripcion')
+      .select('id, ruta_storage, drive_file_id, descripcion, tipo')
       .eq('equipo_id', id)
-      .order('created_at', { ascending: false }),
+      .order('created_at', { ascending: false })
+      .order('id'),
     puedeVerMantenimientos
       ? supabase
           .from('mantenimientos')
@@ -404,10 +411,16 @@ export async function obtenerDetalleEquipo(
   if (fotos.error) throw fotos.error
   if (mantenimientos.error) throw mantenimientos.error
 
+  let principalElegida = false
   const fotografias = await Promise.all(
     (fotos.data ?? []).map(async (foto) => {
+      let tipo = foto.tipo
+      if (tipo === 'principal') {
+        if (principalElegida) tipo = 'adicional'
+        else principalElegida = true
+      }
       if (foto.drive_file_id) {
-        return { ...foto, url: await descargarFotografiaDrive(foto.id) }
+        return { ...foto, tipo, url: await descargarFotografiaDrive(foto.id) }
       }
       if (!foto.ruta_storage) {
         throw new Error(`La fotografía ${foto.id} no tiene una ubicación registrada.`)
@@ -416,7 +429,7 @@ export async function obtenerDetalleEquipo(
         .from('fotografias-equipos')
         .createSignedUrl(foto.ruta_storage, 3600)
       if (error) throw error
-      return { ...foto, url: data.signedUrl }
+      return { ...foto, tipo, url: data.signedUrl }
     }),
   )
 
@@ -522,6 +535,7 @@ export async function reactivarEquipo(id: string) {
 export async function subirFotografia(
   equipoId: string,
   archivo: File,
+  modo: 'principal' | 'adicional' | 'reemplazar' = 'principal',
 ): Promise<void> {
   const optimizada = await optimizarImagen(archivo)
   const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
@@ -530,6 +544,7 @@ export async function subirFotografia(
 
   const body = new FormData()
   body.append('equipoId', equipoId)
+  body.append('modo', modo)
   body.append('file', optimizada, 'fotografia.jpg')
   const response = await fetch(
     `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/fotografias-drive`,
@@ -552,6 +567,46 @@ export async function subirFotografia(
         : `No se pudo subir la fotografía (HTTP ${response.status}).`
     throw new Error(message)
   }
+}
+
+async function operarFotografiaDrive(
+  method: 'PATCH' | 'DELETE',
+  fotografiaId: string,
+  equipoId: string,
+): Promise<void> {
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
+  if (sessionError) throw sessionError
+  if (!sessionData.session) throw new Error('Inicia sesión para gestionar fotografías.')
+
+  const response = await fetch(
+    `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/fotografias-drive`,
+    {
+      method,
+      headers: {
+        Authorization: `Bearer ${sessionData.session.access_token}`,
+        apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ fotografiaId, equipoId }),
+    },
+  )
+  if (!response.ok) {
+    const result: unknown = await response.json().catch(() => null)
+    const message =
+      typeof result === 'object' && result !== null && 'error' in result &&
+      typeof result.error === 'string'
+        ? result.error
+        : `No se pudo gestionar la fotografía (HTTP ${response.status}).`
+    throw new Error(message)
+  }
+}
+
+export function establecerFotografiaPrincipal(fotografiaId: string, equipoId: string) {
+  return operarFotografiaDrive('PATCH', fotografiaId, equipoId)
+}
+
+export function eliminarFotografia(fotografiaId: string, equipoId: string) {
+  return operarFotografiaDrive('DELETE', fotografiaId, equipoId)
 }
 
 async function descargarFotografiaDrive(fotografiaId: string): Promise<string> {

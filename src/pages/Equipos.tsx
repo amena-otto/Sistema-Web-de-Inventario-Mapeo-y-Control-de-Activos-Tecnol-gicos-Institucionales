@@ -7,7 +7,9 @@ import {
   crearCategoria,
   crearEquipo,
   darDeBajaEquipo,
+  eliminarFotografia,
   estadosOperativos,
+  establecerFotografiaPrincipal,
   guardarComponente,
   guardarRelacion,
   importarFila,
@@ -31,6 +33,7 @@ import {
 } from '../services/equiposService'
 
 const porPagina = 12
+const registrosRecientes = 10
 const etiquetasEstado: Record<EstadoOperativo, string> = {
   operativo: 'Operativo',
   con_fallas: 'Operativo con observaciones',
@@ -218,10 +221,11 @@ export default function Equipos() {
   const [total, setTotal] = useState(0)
   const [actualizacion, setActualizacion] = useState(0)
   const [pagina, setPagina] = useState(1)
+  const [verHistorialCompleto, setVerHistorialCompleto] = useState(false)
   const [busqueda, setBusqueda] = useState('')
-  const [estado, setEstado] = useState('')
-  const [categoriaFiltro, setCategoriaFiltro] = useState('')
-  const [ambienteFiltro, setAmbienteFiltro] = useState('')
+  const [estado, setEstado] = useState(() => searchParams.get('estado') ?? '')
+  const [categoriaFiltro, setCategoriaFiltro] = useState(() => searchParams.get('categoria') ?? '')
+  const [ambienteFiltro, setAmbienteFiltro] = useState(() => searchParams.get('ambiente') ?? '')
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState('')
   const [aviso, setAviso] = useState('')
@@ -245,6 +249,8 @@ export default function Equipos() {
   const [componenteDetalle, setComponenteDetalle] = useState('')
   const [equipoRelacionado, setEquipoRelacionado] = useState('')
   const [foto, setFoto] = useState<File | null>(null)
+  const [fotoAdicional, setFotoAdicional] = useState<File | null>(null)
+  const [gestionandoFoto, setGestionandoFoto] = useState(false)
   const fotoInputRef = useRef<HTMLInputElement>(null)
   const [importando, setImportando] = useState(false)
   const [exportando, setExportando] = useState(false)
@@ -280,11 +286,12 @@ export default function Equipos() {
     let vigente = true
     listarEquipos({
       pagina,
-      porPagina,
+      porPagina: verHistorialCompleto ? porPagina : registrosRecientes,
       busqueda,
       estado,
       categoriaId: categoriaFiltro,
       ambienteId: ambienteFiltro,
+      ordenReciente: !verHistorialCompleto,
     })
       .then((resultado) => {
         if (!vigente) return
@@ -300,7 +307,7 @@ export default function Equipos() {
     return () => {
       vigente = false
     }
-  }, [pagina, busqueda, estado, categoriaFiltro, ambienteFiltro, actualizacion])
+  }, [pagina, busqueda, estado, categoriaFiltro, ambienteFiltro, actualizacion, verHistorialCompleto])
 
   const paginas = Math.max(1, Math.ceil(total / porPagina))
   const categoriasPorId = useMemo(
@@ -328,6 +335,7 @@ export default function Equipos() {
     setTecnicas({})
     setDuplicados([])
     setFoto(null)
+    setFotoAdicional(null)
     setError('')
     setModalAbierto(true)
   }
@@ -352,6 +360,7 @@ export default function Equipos() {
     setTecnicas({})
     try {
       const detalle = await obtenerDetalleEquipo(equipo.id, false)
+      setFotografias(detalle.fotografias)
       setTecnicas(
         Object.fromEntries(
           detalle.componentes
@@ -367,6 +376,7 @@ export default function Equipos() {
     }
     setDuplicados([])
     setFoto(null)
+    setFotoAdicional(null)
     setError('')
     setModalAbierto(true)
   }
@@ -457,14 +467,32 @@ export default function Equipos() {
       )
       if (advertencia) setError(advertencia)
       if (foto) {
+        let fotoGuardada = false
         try {
-          await subirFotografia(guardado.id, foto)
-          setAviso(`Equipo ${guardado.codigo_institucional} y fotografía registrados.`)
-          await abrirDetalle(guardado)
+          const tienePrincipal = fotografias.some((item) => item.tipo === 'principal')
+          await subirFotografia(
+            guardado.id,
+            foto,
+            editando && tienePrincipal ? 'reemplazar' : 'principal',
+          )
+          fotoGuardada = true
+          setFoto(null)
+          setAviso(
+            editando
+              ? `Fotografía principal de ${guardado.codigo_institucional} reemplazada.`
+              : `Equipo ${guardado.codigo_institucional} y fotografía principal registrados.`,
+          )
         } catch (e) {
           setError(
             `${advertencia ? `${advertencia} ` : ''}El equipo quedó guardado, pero la fotografía no: ${mostrarError(e, 'error desconocido')}`,
           )
+        }
+        if (fotoGuardada) {
+          try {
+            await refrescarFotografias(guardado.id)
+          } catch (e) {
+            setError(`La fotografía se guardó, pero no se pudo actualizar la vista: ${mostrarError(e, 'error desconocido')}`)
+          }
         }
       }
     } catch (e) {
@@ -552,13 +580,91 @@ export default function Equipos() {
     event.preventDefault()
     if (!equipoDetalle || !foto) return
     setError('')
+    setAviso('')
+    setGestionandoFoto(true)
     try {
-      await subirFotografia(equipoDetalle.id, foto)
+      await subirFotografia(equipoDetalle.id, foto, 'adicional')
       setFoto(null)
-      await abrirDetalle(equipoDetalle)
-      setAviso('Fotografía agregada.')
+      setAviso('Fotografía adicional agregada correctamente.')
+      try {
+        await refrescarFotografias(equipoDetalle.id)
+      } catch (e) {
+        setError(`La fotografía se agregó, pero no se pudo actualizar la vista: ${mostrarError(e, 'error desconocido')}`)
+      }
     } catch (e) {
       setError(mostrarError(e, 'No se pudo subir la fotografía.'))
+    } finally {
+      setGestionandoFoto(false)
+    }
+  }
+
+  async function agregarFotoEditando(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!editando || !fotoAdicional) return
+    setError('')
+    setAviso('')
+    setGestionandoFoto(true)
+    try {
+      await subirFotografia(editando.id, fotoAdicional, 'adicional')
+      setFotoAdicional(null)
+      setAviso('Fotografía adicional agregada correctamente.')
+      try {
+        await refrescarFotografias(editando.id)
+      } catch (e) {
+        setError(`La fotografía se agregó, pero no se pudo actualizar la vista: ${mostrarError(e, 'error desconocido')}`)
+      }
+    } catch (e) {
+      setError(mostrarError(e, 'No se pudo subir la fotografía adicional.'))
+    } finally {
+      setGestionandoFoto(false)
+    }
+  }
+
+  async function refrescarFotografias(equipoId: string) {
+    const detalle = await obtenerDetalleEquipo(equipoId, false)
+    setFotografias(detalle.fotografias)
+  }
+
+  async function cambiarFotografiaPrincipal(equipoId: string, fotografia: Fotografia) {
+    setError('')
+    setAviso('')
+    setGestionandoFoto(true)
+    try {
+      await establecerFotografiaPrincipal(fotografia.id, equipoId)
+      setAviso('Fotografía principal actualizada.')
+      try {
+        await refrescarFotografias(equipoId)
+      } catch (e) {
+        setError(`La fotografía principal se cambió, pero no se pudo actualizar la vista: ${mostrarError(e, 'error desconocido')}`)
+      }
+    } catch (e) {
+      setError(mostrarError(e, 'No se pudo cambiar la fotografía principal.'))
+    } finally {
+      setGestionandoFoto(false)
+    }
+  }
+
+  async function eliminarFoto(equipoId: string, fotografia: Fotografia) {
+    if (!window.confirm('¿Eliminar esta fotografía? Esta acción no se puede deshacer.')) return
+    setError('')
+    setAviso('')
+    setGestionandoFoto(true)
+    try {
+      await eliminarFotografia(fotografia.id, equipoId)
+      setAviso(
+        fotografia.tipo === 'principal'
+          ? 'Fotografía eliminada. Si había fotografías adicionales, una de ellas quedó como principal.'
+          : 'Fotografía eliminada correctamente.',
+      )
+      try {
+        await refrescarFotografias(equipoId)
+      } catch (e) {
+        setError(`La fotografía se eliminó, pero no se pudo actualizar la vista: ${mostrarError(e, 'error desconocido')}`)
+      }
+    } catch (e) {
+      setError(mostrarError(e, 'No se pudo eliminar la fotografía.'))
+    } finally {
+      setGestionandoFoto(false)
     }
   }
 
@@ -999,6 +1105,21 @@ export default function Equipos() {
       </div>
 
       <div className="mt-4 overflow-x-auto rounded-xl bg-white shadow">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
+          <h2 className="font-semibold text-slate-800">
+            {verHistorialCompleto ? 'Historial completo de equipos' : 'Últimos equipos registrados'}
+          </h2>
+          <button
+            type="button"
+            onClick={() => {
+              setPagina(1)
+              setVerHistorialCompleto((actual) => !actual)
+            }}
+            className="rounded-lg border border-blue-200 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50"
+          >
+            {verHistorialCompleto ? 'Ver últimos registros' : 'Ver historial completo'}
+          </button>
+        </div>
         <table className="w-full min-w-[900px] text-left text-sm">
           <thead className="border-b bg-slate-50 text-slate-600">
             <tr>
@@ -1068,10 +1189,17 @@ export default function Equipos() {
         </table>
       </div>
       <div className="mt-3 flex items-center justify-between text-sm text-slate-600">
-        <span>{total} equipos · página {pagina} de {paginas}</span>
+        <span>
+          {verHistorialCompleto ? total : Math.min(total, registrosRecientes)} de {total} equipos
+          {verHistorialCompleto ? ` · página ${pagina} de ${paginas}` : ' · más recientes'}
+        </span>
         <div className="flex gap-2">
-          <button type="button" disabled={pagina <= 1 || cargando} onClick={() => setPagina((actual) => actual - 1)} className="rounded border border-slate-300 px-3 py-1 disabled:opacity-50">Anterior</button>
-          <button type="button" disabled={pagina >= paginas || cargando} onClick={() => setPagina((actual) => actual + 1)} className="rounded border border-slate-300 px-3 py-1 disabled:opacity-50">Siguiente</button>
+          {verHistorialCompleto && (
+            <>
+              <button type="button" disabled={pagina <= 1 || cargando} onClick={() => setPagina((actual) => actual - 1)} className="rounded border border-slate-300 px-3 py-1 disabled:opacity-50">Anterior</button>
+              <button type="button" disabled={pagina >= paginas || cargando} onClick={() => setPagina((actual) => actual + 1)} className="rounded border border-slate-300 px-3 py-1 disabled:opacity-50">Siguiente</button>
+            </>
+          )}
         </div>
       </div>
 
@@ -1101,6 +1229,16 @@ export default function Equipos() {
               </div>
               <button type="button" onClick={() => setModalAbierto(false)} aria-label="Cerrar formulario" className="rounded border px-3 py-1">Cerrar</button>
             </div>
+            {error && (
+              <p role="alert" className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                {error}
+              </p>
+            )}
+            {aviso && (
+              <p role="status" className="mt-4 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-800">
+                {aviso}
+              </p>
+            )}
             {!categorias.length && (
               <p role="alert" className="mt-4 rounded bg-amber-50 p-3 text-sm text-amber-900">
                 No hay categorías activas. Un administrador debe crearlas en la gestión de categorías antes de registrar equipos.
@@ -1193,8 +1331,12 @@ export default function Equipos() {
                     </div>
 
                     <div>
-                      <h4 className="font-semibold">Fotografía</h4>
-                      <p className="mt-1 text-xs text-slate-500">La imagen se optimiza antes de subirla (máximo 2 MB).</p>
+                      <h4 className="font-semibold">Fotografía principal</h4>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {editando
+                          ? 'Selecciona una imagen para reemplazar la principal al guardar. Se optimiza antes de subirla (máximo 2 MB).'
+                          : 'La imagen se optimiza antes de subirla (máximo 2 MB).'}
+                      </p>
                       <input
                         ref={fotoInputRef}
                         type="file"
@@ -1215,6 +1357,61 @@ export default function Equipos() {
                       <span className="ml-3 text-sm text-slate-600">
                         {foto?.name ?? 'Ninguna fotografía seleccionada'}
                       </span>
+                      {editando && (
+                        <>
+                          <div className="mt-3 flex flex-wrap gap-3">
+                            {fotografias.map((fotografia) => (
+                              <div key={fotografia.id} className="w-40">
+                                <a href={fotografia.url} target="_blank" rel="noreferrer">
+                                  <img
+                                    src={fotografia.url}
+                                    alt={fotografia.descripcion ?? `Fotografía de ${editando.codigo_institucional}`}
+                                    className="h-28 w-40 rounded-lg border object-cover"
+                                  />
+                                </a>
+                                <div className="mt-1 flex flex-wrap items-center gap-1">
+                                  <span className={`rounded px-2 py-1 text-[10px] font-semibold ${fotografia.tipo === 'principal' ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-600'}`}>
+                                    {fotografia.tipo === 'principal' ? 'Principal' : 'Adicional'}
+                                  </span>
+                                  {fotografia.tipo !== 'principal' && (
+                                    <button
+                                      type="button"
+                                      disabled={gestionandoFoto}
+                                      onClick={() => void cambiarFotografiaPrincipal(editando.id, fotografia)}
+                                      className="text-xs font-medium text-blue-700 hover:underline disabled:opacity-50"
+                                    >
+                                      Hacer principal
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    disabled={gestionandoFoto}
+                                    onClick={() => void eliminarFoto(editando.id, fotografia)}
+                                    className="text-xs font-medium text-red-700 hover:underline disabled:opacity-50"
+                                  >
+                                    Eliminar
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                          <form onSubmit={(event) => void agregarFotoEditando(event)} className="mt-3 flex flex-wrap items-center gap-2">
+                            <input
+                              type="file"
+                              accept="image/jpeg,image/png,image/webp"
+                              onChange={(event) => setFotoAdicional(event.target.files?.[0] ?? null)}
+                              className="text-sm"
+                            />
+                            <button
+                              type="submit"
+                              disabled={!fotoAdicional || gestionandoFoto}
+                              className="rounded border border-slate-300 px-3 py-2 text-sm disabled:opacity-50"
+                            >
+                              {gestionandoFoto ? 'Subiendo...' : 'Agregar fotografía'}
+                            </button>
+                          </form>
+                        </>
+                      )}
                     </div>
                   </div>
                 </details>
@@ -1250,6 +1447,16 @@ export default function Equipos() {
               </div>
               <button type="button" onClick={() => setEquipoDetalle(null)} aria-label="Cerrar detalle" className="rounded border px-3 py-1">Cerrar</button>
             </div>
+            {error && (
+              <p role="alert" className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                {error}
+              </p>
+            )}
+            {aviso && (
+              <p role="status" className="mt-4 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-800">
+                {aviso}
+              </p>
+            )}
             {detalleCargando ? <p className="py-8 text-center">Cargando detalle...</p> : (
               <div className="mt-4 space-y-5">
                 <dl className="grid gap-3 rounded-lg bg-slate-50 p-4 text-sm sm:grid-cols-2 lg:grid-cols-3">
@@ -1315,16 +1522,45 @@ export default function Equipos() {
                   {fotografias.length ? (
                     <div className="mt-2 flex flex-wrap gap-3">
                       {fotografias.map((fotografia) => (
-                        <a key={fotografia.id} href={fotografia.url} target="_blank" rel="noreferrer">
-                          <img src={fotografia.url} alt={fotografia.descripcion ?? `Fotografía de ${equipoDetalle.codigo_institucional}`} className="h-32 w-40 rounded-lg border object-cover" />
-                        </a>
+                        <div key={fotografia.id} className="w-40">
+                          <a href={fotografia.url} target="_blank" rel="noreferrer">
+                            <img src={fotografia.url} alt={fotografia.descripcion ?? `Fotografía de ${equipoDetalle.codigo_institucional}`} className="h-32 w-40 rounded-lg border object-cover" />
+                          </a>
+                          <div className="mt-1 flex flex-wrap items-center gap-1">
+                            <span className={`rounded px-2 py-1 text-[10px] font-semibold ${fotografia.tipo === 'principal' ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-600'}`}>
+                              {fotografia.tipo === 'principal' ? 'Principal' : 'Adicional'}
+                            </span>
+                            {puedeEditar && equipoDetalle.situacion === 'activo' && fotografia.tipo !== 'principal' && (
+                              <button
+                                type="button"
+                                disabled={gestionandoFoto}
+                                onClick={() => void cambiarFotografiaPrincipal(equipoDetalle.id, fotografia)}
+                                className="text-xs font-medium text-blue-700 hover:underline disabled:opacity-50"
+                              >
+                                Hacer principal
+                              </button>
+                            )}
+                            {puedeEditar && equipoDetalle.situacion === 'activo' && (
+                              <button
+                                type="button"
+                                disabled={gestionandoFoto}
+                                onClick={() => void eliminarFoto(equipoDetalle.id, fotografia)}
+                                className="text-xs font-medium text-red-700 hover:underline disabled:opacity-50"
+                              >
+                                Eliminar
+                              </button>
+                            )}
+                          </div>
+                        </div>
                       ))}
                     </div>
                   ) : <p className="mt-1 text-sm text-slate-500">Sin fotografías.</p>}
                   {puedeEditar && equipoDetalle.situacion === 'activo' && (
                     <form onSubmit={(event) => void agregarFoto(event)} className="mt-2 flex flex-wrap items-center gap-2">
                       <input type="file" required accept="image/jpeg,image/png,image/webp" onChange={(e) => setFoto(e.target.files?.[0] ?? null)} className="text-sm" />
-                      <button type="submit" disabled={!foto} className="rounded border border-slate-300 px-3 py-2 text-sm disabled:opacity-50">Optimizar y subir</button>
+                      <button type="submit" disabled={!foto || gestionandoFoto} className="rounded border border-slate-300 px-3 py-2 text-sm disabled:opacity-50">
+                        {gestionandoFoto ? 'Subiendo...' : 'Agregar fotografía'}
+                      </button>
                     </form>
                   )}
                 </div>

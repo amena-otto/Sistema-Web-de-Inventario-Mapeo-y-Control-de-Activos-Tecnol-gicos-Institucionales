@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { usePermissions } from '../hooks/usePermissions'
 import {
   estadosMantenimiento,
@@ -83,12 +84,15 @@ const filtrosVacios: FiltrosMantenimiento = {
   estado: '',
   desde: '',
   hasta: '',
+  revisionVencida: false,
+  ordenReciente: true,
   pagina: 1,
   porPagina,
 }
 
 export default function Mantenimientos() {
   const { can } = usePermissions()
+  const [searchParams] = useSearchParams()
   const puedeRegistrar = can('mantenimientos.registrar')
   const [equipos, setEquipos] = useState<EquipoMantenimiento[]>([])
   const [tecnicos, setTecnicos] = useState<TecnicoMantenimiento[]>([])
@@ -100,7 +104,12 @@ export default function Mantenimientos() {
     vencidos: 0,
     mes: 0,
   })
-  const [filtros, setFiltros] = useState<FiltrosMantenimiento>(filtrosVacios)
+  const [filtros, setFiltros] = useState<FiltrosMantenimiento>(() => ({
+    ...filtrosVacios,
+    estado: searchParams.get('estado') ?? '',
+    revisionVencida: searchParams.get('revision') === 'vencida',
+  }))
+  const [verHistorialCompleto, setVerHistorialCompleto] = useState(false)
   const [cargando, setCargando] = useState(true)
   const [cargandoCatalogos, setCargandoCatalogos] = useState(true)
   const [error, setError] = useState('')
@@ -201,7 +210,7 @@ export default function Mantenimientos() {
     setNuevo((actual) => ({ ...actual, [campo]: valor }))
   }
 
-  const totalPaginas = Math.max(1, Math.ceil(total / porPagina))
+  const totalPaginas = Math.max(1, Math.ceil(total / filtros.porPagina))
 
   return (
     <main className="space-y-6">
@@ -254,21 +263,60 @@ export default function Mantenimientos() {
 
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-lg font-semibold text-slate-900">Historial de intervenciones</h2>
-          <button
-            type="button"
-            onClick={() => {
-              setError('')
-              setCargando(true)
-              setFiltros((actuales) => ({ ...actuales }))
-            }}
-            className="text-sm font-medium text-blue-700 hover:text-blue-900"
-          >
-            Actualizar
-          </button>
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">
+              {verHistorialCompleto ? 'Historial completo de intervenciones' : 'Últimos mantenimientos registrados'}
+            </h2>
+            {!verHistorialCompleto && (
+              <p className="mt-1 text-xs text-slate-500">Mostrando los 10 registros más recientes.</p>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setError('')
+                setCargando(true)
+                setFiltros((actuales) => ({ ...actuales }))
+              }}
+              className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Actualizar
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setError('')
+                setCargando(true)
+                const mostrarHistorial = !verHistorialCompleto
+                setFiltros((actuales) => ({
+                  ...actuales,
+                  pagina: 1,
+                  ordenReciente: !mostrarHistorial,
+                }))
+                setVerHistorialCompleto((actual) => !actual)
+              }}
+              className="rounded-lg border border-blue-200 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50"
+            >
+              {verHistorialCompleto ? 'Ver últimos registros' : 'Ver historial completo'}
+            </button>
+          </div>
         </div>
 
-        <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        {filtros.revisionVencida && (
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            <span>Listado filtrado: equipos con revisión vencida.</span>
+            <button
+              type="button"
+              onClick={() => cambiarFiltro({ revisionVencida: false })}
+              className="font-semibold underline"
+            >
+              Quitar filtro
+            </button>
+          </div>
+        )}
+
+        {verHistorialCompleto && <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <label className="text-sm text-slate-700">
             Equipo
             <select
@@ -328,7 +376,7 @@ export default function Mantenimientos() {
               className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2"
             />
           </label>
-        </div>
+        </div>}
 
         {cargando ? (
           <p className="py-10 text-center text-sm text-slate-500">Cargando historial...</p>
@@ -413,8 +461,10 @@ export default function Mantenimientos() {
         )}
 
         <div className="mt-5 flex flex-wrap items-center justify-between gap-3 text-sm text-slate-600">
-          <span>{total} registro{total === 1 ? '' : 's'}</span>
-          <div className="flex items-center gap-2">
+          <span>
+            {verHistorialCompleto ? total : Math.min(total, filtros.porPagina)} de {total} registro{total === 1 ? '' : 's'}
+          </span>
+          {verHistorialCompleto && <div className="flex items-center gap-2">
             <button
               type="button"
               disabled={filtros.pagina <= 1 || cargando}
@@ -440,7 +490,7 @@ export default function Mantenimientos() {
             >
               Siguiente
             </button>
-          </div>
+          </div>}
         </div>
       </section>
 

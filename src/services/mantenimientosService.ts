@@ -54,6 +54,8 @@ export type FiltrosMantenimiento = {
   estado: string
   desde: string
   hasta: string
+  revisionVencida: boolean
+  ordenReciente: boolean
   pagina: number
   porPagina: number
 }
@@ -90,8 +92,13 @@ export async function listarMantenimientos(filtros: FiltrosMantenimiento) {
       'id, equipo_id, tipo, fecha_mantenimiento, descripcion, problema_reportado, diagnostico, acciones_realizadas, componentes_reemplazados, resultado, observaciones, proxima_revision, estado, responsable_id, created_at',
       { count: 'exact' },
     )
-    .order('fecha_mantenimiento', { ascending: false })
-    .order('created_at', { ascending: false })
+    .order(
+      filtros.ordenReciente ? 'created_at' : 'fecha_mantenimiento',
+      { ascending: false },
+    )
+    .order(filtros.ordenReciente ? 'fecha_mantenimiento' : 'created_at', {
+      ascending: false,
+    })
     .range(
       (filtros.pagina - 1) * filtros.porPagina,
       filtros.pagina * filtros.porPagina - 1,
@@ -102,6 +109,12 @@ export async function listarMantenimientos(filtros: FiltrosMantenimiento) {
   if (filtros.estado) query = query.eq('estado', filtros.estado)
   if (filtros.desde) query = query.gte('fecha_mantenimiento', filtros.desde)
   if (filtros.hasta) query = query.lte('fecha_mantenimiento', filtros.hasta)
+  if (filtros.revisionVencida) {
+    const fecha = new Date()
+    fecha.setMinutes(fecha.getMinutes() - fecha.getTimezoneOffset())
+    query = query.lte('proxima_revision', fecha.toISOString().slice(0, 10))
+      .neq('estado', 'completado')
+  }
 
   const { data, error, count } = await query
   if (error) throw error

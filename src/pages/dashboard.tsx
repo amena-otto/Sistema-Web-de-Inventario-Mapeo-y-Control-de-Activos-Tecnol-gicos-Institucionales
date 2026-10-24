@@ -3,19 +3,21 @@ import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { usePermissions } from '../hooks/usePermissions'
+import { supabase } from '../services/supabaseClient'
 import {
+  type FiltrosDashboard,
   obtenerResumenDashboard,
   type ResumenDashboard,
 } from '../services/dashboardService'
 
 const coloresEstado = [
-  { nombre: 'Operativos', color: 'bg-emerald-500', valor: (r: ResumenDashboard) => r.equiposOperativos },
-  { nombre: 'Con fallas', color: 'bg-orange-500', valor: (r: ResumenDashboard) => r.equiposConFallas },
-  { nombre: 'En mantenimiento', color: 'bg-amber-500', valor: (r: ResumenDashboard) => r.equiposMantenimiento },
-  { nombre: 'Inoperativos', color: 'bg-rose-500', valor: (r: ResumenDashboard) => r.equiposInoperativos },
-  { nombre: 'En almacén', color: 'bg-violet-500', valor: (r: ResumenDashboard) => r.equiposAlmacen },
-  { nombre: 'Dados de baja', color: 'bg-slate-400', valor: (r: ResumenDashboard) => r.equiposBaja },
-  { nombre: 'Archivados', color: 'bg-sky-500', valor: (r: ResumenDashboard) => r.equiposArchivados },
+  { nombre: 'Operativos', estado: 'operativo', color: 'bg-emerald-500', valor: (r: ResumenDashboard) => r.equiposOperativos },
+  { nombre: 'Con fallas', estado: 'con_fallas', color: 'bg-orange-500', valor: (r: ResumenDashboard) => r.equiposConFallas },
+  { nombre: 'En mantenimiento', estado: 'en_mantenimiento', color: 'bg-amber-500', valor: (r: ResumenDashboard) => r.equiposMantenimiento },
+  { nombre: 'Inoperativos', estado: 'inoperativo', color: 'bg-rose-500', valor: (r: ResumenDashboard) => r.equiposInoperativos },
+  { nombre: 'En almacén', estado: 'en_almacen', color: 'bg-violet-500', valor: (r: ResumenDashboard) => r.equiposAlmacen },
+  { nombre: 'Dados de baja', estado: 'baja', color: 'bg-slate-400', valor: (r: ResumenDashboard) => r.equiposBaja },
+  { nombre: 'Archivados', estado: 'archivado', color: 'bg-sky-500', valor: (r: ResumenDashboard) => r.equiposArchivados },
 ]
 
 function fechaInstitucional() {
@@ -33,15 +35,17 @@ function TarjetaIndicador({
   detalle,
   tono,
   icono,
+  to,
 }: {
   etiqueta: string
   cantidad: number
   detalle: string
   tono: string
   icono: string
+  to: string
 }) {
   return (
-    <article className="rounded-xl border border-slate-200/80 bg-white p-5 shadow-[0_4px_16px_rgba(15,41,71,0.04)]">
+    <Link to={to} className="block rounded-xl border border-slate-200/80 bg-white p-5 shadow-[0_4px_16px_rgba(15,41,71,0.04)] transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-sm font-medium text-slate-500">{etiqueta}</p>
@@ -54,7 +58,7 @@ function TarjetaIndicador({
           </svg>
         </span>
       </div>
-    </article>
+    </Link>
   )
 }
 
@@ -87,6 +91,11 @@ export default function Dashboard() {
   const { perfil } = useAuth()
   const { can } = usePermissions()
   const puedeVerMantenimientos = can('mantenimientos.ver')
+  const [filtros, setFiltros] = useState<FiltrosDashboard>({
+    pabellonId: '',
+    pisoId: '',
+    ambienteId: '',
+  })
   const [resumen, setResumen] = useState<ResumenDashboard | null>(null)
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState('')
@@ -95,7 +104,7 @@ export default function Dashboard() {
     setCargando(true)
     setError('')
     try {
-      setResumen(await obtenerResumenDashboard(puedeVerMantenimientos))
+      setResumen(await obtenerResumenDashboard(puedeVerMantenimientos, filtros))
     } catch (e) {
       setError(
         e instanceof Error && e.message
@@ -105,35 +114,50 @@ export default function Dashboard() {
     } finally {
       setCargando(false)
     }
-  }, [puedeVerMantenimientos])
+  }, [puedeVerMantenimientos, filtros])
 
   useEffect(() => {
     let vigente = true
-    obtenerResumenDashboard(puedeVerMantenimientos)
-      .then((datos) => {
-        if (vigente) setResumen(datos)
+    queueMicrotask(() => {
+      if (vigente) void cargar()
+    })
+    const canal = supabase
+      .channel('dashboard-inventario')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'equipos' }, () => {
+        if (vigente) void cargar()
       })
-      .catch((e: unknown) => {
-        if (vigente) {
-          setError(
-            e instanceof Error && e.message
-              ? e.message
-              : 'No se pudo cargar el resumen del inventario.',
-          )
-        }
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mantenimientos' }, () => {
+        if (vigente) void cargar()
       })
-      .finally(() => {
-        if (vigente) setCargando(false)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'ambientes' }, () => {
+        if (vigente) void cargar()
       })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'categorias_equipos' }, () => {
+        if (vigente) void cargar()
+      })
+      .subscribe()
     return () => {
       vigente = false
+      void supabase.removeChannel(canal)
     }
-  }, [puedeVerMantenimientos])
+  }, [cargar])
 
   const nombre = perfil?.nombres?.trim().split(/\s+/)[0] ?? 'Usuario'
-  const maxLaboratorio = Math.max(
+  const maxUbicacion = Math.max(
     1,
-    ...(resumen?.laboratorios.map((lab) => lab.cantidad) ?? []),
+    ...(resumen?.ubicaciones.map((ubicacion) => ubicacion.cantidad) ?? []),
+  )
+  const maxCategoria = Math.max(
+    1,
+    ...(resumen?.categorias.map((categoria) => categoria.cantidad) ?? []),
+  )
+  const maxPabellon = Math.max(
+    1,
+    ...(resumen?.pabellones.map((pabellon) => pabellon.cantidad) ?? []),
+  )
+  const maxPiso = Math.max(
+    1,
+    ...(resumen?.pisos.map((piso) => piso.cantidad) ?? []),
   )
   const valoresEstados = resumen
     ? coloresEstado.map((estado) => ({ ...estado, cantidad: Math.max(0, estado.valor(resumen)) }))
@@ -182,6 +206,54 @@ export default function Dashboard() {
         </div>
       ) : resumen ? (
         <>
+          <section aria-label="Filtros de ubicación" className="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-4">
+            <label className="text-sm font-medium text-slate-700">
+              Pabellón
+              <select
+                value={filtros.pabellonId}
+                onChange={(event) => setFiltros({ pabellonId: event.target.value, pisoId: '', ambienteId: '' })}
+                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2"
+              >
+                <option value="">Todos los pabellones</option>
+                {resumen.opcionesPabellon.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}
+              </select>
+            </label>
+            <label className="text-sm font-medium text-slate-700">
+              Piso
+              <select
+                value={filtros.pisoId}
+                onChange={(event) => setFiltros((actual) => ({ ...actual, pisoId: event.target.value, ambienteId: '' }))}
+                disabled={!filtros.pabellonId}
+                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 disabled:bg-slate-100"
+              >
+                <option value="">Todos los pisos</option>
+                {resumen.opcionesPiso.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}
+              </select>
+            </label>
+            <label className="text-sm font-medium text-slate-700">
+              Ambiente
+              <select
+                value={filtros.ambienteId}
+                onChange={(event) => setFiltros((actual) => ({ ...actual, ambienteId: event.target.value }))}
+                disabled={!filtros.pisoId}
+                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 disabled:bg-slate-100"
+              >
+                <option value="">Todos los ambientes</option>
+                {resumen.opcionesAmbiente.map((item) => <option key={item.id} value={item.id}>{item.codigo} — {item.nombre}</option>)}
+              </select>
+            </label>
+            <div className="flex items-end">
+              <button
+                type="button"
+                onClick={() => setFiltros({ pabellonId: '', pisoId: '', ambienteId: '' })}
+                disabled={!filtros.pabellonId && !filtros.pisoId && !filtros.ambienteId}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Limpiar filtros
+              </button>
+            </div>
+          </section>
+
           <section aria-label="Indicadores del inventario" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <TarjetaIndicador
               etiqueta="Equipos registrados"
@@ -189,6 +261,15 @@ export default function Dashboard() {
               detalle={`${resumen.equiposActivos.toLocaleString('es-PE')} activos en el inventario`}
               tono="bg-blue-50 text-[#1c5286]"
               icono="M4 5h16v11H4zM8 20h8M12 16v4"
+              to="/equipos"
+            />
+            <TarjetaIndicador
+              etiqueta="Operativos"
+              cantidad={resumen.equiposOperativos}
+              detalle="Equipos disponibles para uso"
+              tono="bg-emerald-50 text-emerald-700"
+              icono="m5 12 4 4L19 6"
+              to="/equipos?estado=operativo"
             />
             <TarjetaIndicador
               etiqueta="En mantenimiento"
@@ -196,6 +277,15 @@ export default function Dashboard() {
               detalle="Equipos con intervención activa"
               tono="bg-amber-50 text-amber-700"
               icono="M14.5 6.5a4 4 0 0 0-5 5L4 17l3 3 5.5-5.5a4 4 0 0 0 5-5l-2.5 2.5-3-3z"
+              to="/equipos?estado=en_mantenimiento"
+            />
+            <TarjetaIndicador
+              etiqueta="En almacén"
+              cantidad={resumen.equiposAlmacen}
+              detalle="Equipos almacenados"
+              tono="bg-violet-50 text-violet-700"
+              icono="M3 10h18M5 10V5h14v5M5 10v9h14v-9M9 19v-5h6v5"
+              to="/equipos?estado=en_almacen"
             />
             <TarjetaIndicador
               etiqueta="Dados de baja"
@@ -203,6 +293,7 @@ export default function Dashboard() {
               detalle="Registros conservados en historial"
               tono="bg-rose-50 text-rose-700"
               icono="M5 7h14M10 11v6m4-6v6M6 7l1 13h10l1-13M9 7V4h6v3"
+              to="/equipos?estado=baja"
             />
             <TarjetaIndicador
               etiqueta="Inoperativos"
@@ -210,40 +301,130 @@ export default function Dashboard() {
               detalle="Requieren evaluación o atención"
               tono="bg-slate-100 text-slate-700"
               icono="M12 8v5m0 4h.01M10.3 4.9 2.8 18a1.5 1.5 0 0 0 1.3 2.2h15.8a1.5 1.5 0 0 0 1.3-2.2L13.7 4.9a2 2 0 0 0-3.4 0Z"
+              to="/equipos?estado=inoperativo"
             />
+            {resumen.mantenimientos && (
+              <TarjetaIndicador
+                etiqueta="Pendientes de revisión"
+                cantidad={resumen.mantenimientos.revisionVencida}
+                detalle="Equipos con revisión vencida"
+                tono="bg-orange-50 text-orange-700"
+                icono="M12 8v5m0 4h.01M10.3 4.9 2.8 18a1.5 1.5 0 0 0 1.3 2.2h15.8a1.5 1.5 0 0 0 1.3-2.2L13.7 4.9a2 2 0 0 0-3.4 0Z"
+                to="/mantenimientos?revision=vencida"
+              />
+            )}
           </section>
 
           <section className="grid gap-6 xl:grid-cols-[1.45fr_1fr]">
             <Panel
-              titulo="Equipos por laboratorio"
-              subtitulo="Cantidad de activos asignados a cada laboratorio"
-              accion={<span className="rounded-full bg-blue-50 px-3 py-1 text-[11px] font-semibold text-[#1c5286]">Top 8</span>}
+              titulo="Equipos por pabellón, piso y ambiente"
+              subtitulo="Distribución por edificio y ubicación detallada"
             >
-              {resumen.laboratorios.length ? (
-                <div className="space-y-4">
-                  {resumen.laboratorios.map((laboratorio, indice) => (
-                    <div key={laboratorio.id} className="grid grid-cols-[minmax(0,1fr)_2.2rem] items-center gap-x-4 gap-y-2">
-                      <div className="flex min-w-0 items-center gap-2">
-                        <span className="w-5 text-[11px] font-semibold text-slate-400">{String(indice + 1).padStart(2, '0')}</span>
-                        <span className="truncate text-sm font-medium text-slate-700" title={laboratorio.nombre}>{laboratorio.nombre}</span>
-                      </div>
-                      <span className="text-right text-sm font-bold tabular-nums text-[#17395e]">{laboratorio.cantidad}</span>
-                      <div className="col-span-2 h-2 overflow-hidden rounded-full bg-slate-100">
-                        <div
-                          className="h-full rounded-full bg-gradient-to-r from-[#1c5286] to-[#4b86b9] transition-all duration-500"
-                          style={{ width: `${(laboratorio.cantidad / maxLaboratorio) * 100}%` }}
-                        />
+              {resumen.pabellones.length || resumen.pisos.length || resumen.ubicaciones.length ? (
+                <div className="max-h-[420px] space-y-3 overflow-y-auto pr-1">
+                  {resumen.pabellones.length > 0 && (
+                    <div className="rounded-lg bg-slate-50 p-3">
+                      <h3 className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-500">Por pabellón</h3>
+                      <div className="space-y-3">
+                        {resumen.pabellones.map((pabellon) => (
+                          <div key={pabellon.id}>
+                            <div className="flex justify-between gap-3 text-sm">
+                              <span className="truncate text-slate-700">{pabellon.nombre}</span>
+                              <span className="font-bold tabular-nums text-[#17395e]">{pabellon.cantidad}</span>
+                            </div>
+                            <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white">
+                              <div className="h-full rounded-full bg-[#1c5286]" style={{ width: `${(pabellon.cantidad / maxPabellon) * 100}%` }} />
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
+                  )}
+                  {resumen.pisos.length > 0 && (
+                    <div className="rounded-lg bg-slate-50 p-3">
+                      <h3 className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-500">Por piso</h3>
+                      <div className="space-y-3">
+                        {resumen.pisos.map((piso) => (
+                          <div key={piso.id}>
+                            <div className="flex justify-between gap-3 text-sm">
+                              <span className="truncate text-slate-700">{piso.pabellon} / {piso.nombre}</span>
+                              <span className="font-bold tabular-nums text-[#17395e]">{piso.cantidad}</span>
+                            </div>
+                            <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white">
+                              <div className="h-full rounded-full bg-[#4b86b9]" style={{ width: `${(piso.cantidad / maxPiso) * 100}%` }} />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {resumen.ubicaciones.map((ubicacion) => (
+                    <Link
+                      key={ubicacion.id}
+                      to={`/equipos?ambiente=${encodeURIComponent(ubicacion.id)}`}
+                      className="block rounded-lg border border-slate-100 p-3 transition hover:border-blue-200 hover:bg-blue-50/50"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-slate-700">
+                            {ubicacion.pabellon} / {ubicacion.piso}
+                          </p>
+                          <p className="mt-0.5 truncate text-xs text-slate-500">
+                            {ubicacion.codigo} — {ubicacion.ambiente}
+                          </p>
+                        </div>
+                        <span className="text-sm font-bold tabular-nums text-[#17395e]">{ubicacion.cantidad}</span>
+                      </div>
+                      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
+                        <div
+                          className="h-full rounded-full bg-gradient-to-r from-[#1c5286] to-[#4b86b9] transition-all duration-500"
+                          style={{ width: `${(ubicacion.cantidad / maxUbicacion) * 100}%` }}
+                        />
+                      </div>
+                    </Link>
                   ))}
                 </div>
               ) : (
                 <div className="rounded-lg bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
-                  No hay laboratorios activos para mostrar.
+                  No hay ambientes que coincidan con los filtros.
                 </div>
               )}
             </Panel>
 
+            <Panel
+              titulo="Distribución por categoría"
+              subtitulo="Cantidad de equipos registrados en cada categoría"
+            >
+              {resumen.categorias.length ? (
+                <div className="max-h-[420px] space-y-3 overflow-y-auto pr-1">
+                  {resumen.categorias.map((categoria) => (
+                    <Link
+                      key={categoria.id}
+                      to={`/equipos?categoria=${encodeURIComponent(categoria.id)}`}
+                      className="block rounded-lg p-2 transition hover:bg-blue-50/60"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="truncate text-sm font-medium text-slate-700">{categoria.nombre}</span>
+                        <span className="text-sm font-bold tabular-nums text-[#17395e]">{categoria.cantidad}</span>
+                      </div>
+                      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
+                        <div
+                          className="h-full rounded-full bg-[#4b86b9] transition-all duration-500"
+                          style={{ width: `${(categoria.cantidad / maxCategoria) * 100}%` }}
+                        />
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-lg bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
+                  No hay categorías que coincidan con los filtros.
+                </div>
+              )}
+            </Panel>
+          </section>
+
+          <section className="grid gap-6 xl:grid-cols-[1fr_1.45fr]">
             <Panel
               titulo="Estado de los equipos"
               subtitulo="Distribución de los registros por situación"
@@ -260,27 +441,31 @@ export default function Dashboard() {
                       />
                     ))}
                   </div>
-                  <div className="mt-6 space-y-4">
+                  <div className="mt-6 space-y-2">
                     {valoresEstados.map((estado) => (
-                      <div key={estado.nombre} className="flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-2.5">
+                      <Link
+                        key={estado.nombre}
+                        to={`/equipos?estado=${estado.estado}`}
+                        className="flex items-center justify-between gap-3 rounded-lg px-2 py-2 transition hover:bg-blue-50/60"
+                      >
+                        <span className="flex items-center gap-2.5">
                           <span className={`h-2.5 w-2.5 rounded-full ${estado.color}`} />
                           <span className="text-sm text-slate-600">{estado.nombre}</span>
-                        </div>
-                        <div className="flex items-center gap-3">
+                        </span>
+                        <span className="flex items-center gap-3">
                           <span className="text-xs text-slate-400">{Math.round((estado.cantidad / totalEstado) * 100)}%</span>
                           <span className="w-8 text-right text-sm font-bold tabular-nums text-slate-800">{estado.cantidad}</span>
-                        </div>
-                      </div>
+                        </span>
+                      </Link>
                     ))}
                   </div>
-                  <div className="mt-6 border-t border-slate-100 pt-4 text-xs text-slate-500">
+                  <div className="mt-4 border-t border-slate-100 pt-4 text-xs text-slate-500">
                     Total de equipos: <strong className="text-slate-700">{totalEstado.toLocaleString('es-PE')}</strong>
                   </div>
                 </>
               ) : (
                 <div className="rounded-lg bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
-                  No hay equipos registrados.
+                  No hay equipos que coincidan con los filtros.
                 </div>
               )}
             </Panel>
@@ -295,17 +480,17 @@ export default function Dashboard() {
               >
                 <div className="grid gap-3 sm:grid-cols-3">
                   {[
-                    { etiqueta: 'Pendientes', cantidad: resumen.mantenimientos.pendientes, fondo: 'bg-amber-50', texto: 'text-amber-800', barra: 'bg-amber-500' },
-                    { etiqueta: 'En proceso', cantidad: resumen.mantenimientos.enProceso, fondo: 'bg-blue-50', texto: 'text-blue-800', barra: 'bg-blue-600' },
-                    { etiqueta: 'Completados', cantidad: resumen.mantenimientos.completados, fondo: 'bg-emerald-50', texto: 'text-emerald-800', barra: 'bg-emerald-600' },
+                    { etiqueta: 'Pendientes', estado: 'pendiente', cantidad: resumen.mantenimientos.pendientes, fondo: 'bg-amber-50', texto: 'text-amber-800', barra: 'bg-amber-500' },
+                    { etiqueta: 'En proceso', estado: 'en_proceso', cantidad: resumen.mantenimientos.enProceso, fondo: 'bg-blue-50', texto: 'text-blue-800', barra: 'bg-blue-600' },
+                    { etiqueta: 'Completados', estado: 'completado', cantidad: resumen.mantenimientos.completados, fondo: 'bg-emerald-50', texto: 'text-emerald-800', barra: 'bg-emerald-600' },
                   ].map((estado) => (
-                    <div key={estado.etiqueta} className={`rounded-lg ${estado.fondo} p-4`}>
+                    <Link key={estado.etiqueta} to={`/mantenimientos?estado=${estado.estado}`} className={`rounded-lg ${estado.fondo} p-4 transition hover:ring-2 hover:ring-blue-300`}>
                       <p className={`text-xs font-semibold ${estado.texto}`}>{estado.etiqueta}</p>
                       <p className={`mt-2 text-2xl font-bold ${estado.texto}`}>{estado.cantidad}</p>
                       <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/80">
                         <div className={`h-full rounded-full ${estado.barra}`} style={{ width: `${resumen.mantenimientos.total ? (estado.cantidad / resumen.mantenimientos.total) * 100 : 0}%` }} />
                       </div>
-                    </div>
+                    </Link>
                   ))}
                 </div>
                 <p className="mt-4 text-xs text-slate-500">

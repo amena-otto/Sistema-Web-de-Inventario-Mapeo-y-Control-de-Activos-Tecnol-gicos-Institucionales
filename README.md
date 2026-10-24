@@ -118,12 +118,14 @@ secretos en las fichas de inventario.
 - Las fotografías se optimizan antes de almacenarse. La migración
   `supabase/migrations/007_fotografias_google_drive.sql` agrega soporte para
   fotos nuevas en Google Drive sin invalidar las rutas ya guardadas en
-  Supabase Storage. Configura `GOOGLE_SERVICE_ACCOUNT_JSON` y
-  `GOOGLE_DRIVE_FOLDER_ID` como secretos de Edge Functions; despliega
-  `supabase/functions/fotografias-drive` y concede a la cuenta de servicio
-  acceso de carga a la carpeta de Drive. La función valida la sesión y el rol
-  antes de cargar o servir fotos; las credenciales de Google permanecen en el
-  servidor.
+  Supabase Storage. La Edge Function `fotografias-drive` usa la autorización
+  OAuth almacenada y los secretos OAuth ya configurados en Supabase; no usa
+  credenciales de cuenta de servicio. Admin y técnico pueden cargar fotografías,
+  reemplazar la principal, elegir cuál es principal y eliminar imágenes desde
+  la ficha del equipo. Consulta solo puede visualizarlas. `tipo='principal'`
+  identifica la foto principal y `tipo='adicional'` las demás. Al cambiar la
+  Edge Function, vuelve a desplegarla con el comando `supabase functions deploy fotografias-drive`.
+  Las rutas existentes de Supabase Storage siguen siendo compatibles.
 - Ubicaciones permite administrar pabellones, pisos y ambientes, corregir sus
   datos y eliminar solo los que no tengan dependencias. Los pisos con ambientes
   y los ambientes con equipos deben vaciarse o reasignarse antes de borrarlos.
