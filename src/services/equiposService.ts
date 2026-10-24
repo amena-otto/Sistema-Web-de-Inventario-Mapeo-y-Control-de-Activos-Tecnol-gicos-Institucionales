@@ -52,6 +52,8 @@ export type DatosEquipo = Pick<
 export type Categoria = { id: string; nombre: string }
 export type Ambiente = {
   id: string
+  piso_id: string
+  pabellon_id: string
   codigo: string
   nombre: string
   piso: string
@@ -97,7 +99,7 @@ export async function cargarCatalogos() {
       supabase
         .from('ambientes')
         .select(
-          'id, codigo, nombre, pisos!inner(nombre, pabellones!inner(nombre))',
+          'id, codigo, nombre, piso_id, pisos!inner(nombre, pabellon_id, pabellones!inner(nombre))',
         )
         .eq('activo', true)
         .order('nombre'),
@@ -117,10 +119,13 @@ export async function cargarCatalogos() {
       id: string
       codigo: string
       nombre: string
-      pisos: { nombre: string; pabellones: { nombre: string } }
+      piso_id: string
+      pisos: { nombre: string; pabellon_id: string; pabellones: { nombre: string } }
     }
     return {
       id: fila.id,
+      piso_id: fila.piso_id,
+      pabellon_id: fila.pisos.pabellon_id,
       codigo: fila.codigo,
       nombre: fila.nombre,
       piso: fila.pisos.nombre,
@@ -152,6 +157,8 @@ export async function listarEquipos({
   estado,
   categoriaId,
   ambienteId,
+  ambienteIds,
+  sinUbicacion,
   ordenReciente = false,
 }: {
   pagina: number
@@ -160,6 +167,8 @@ export async function listarEquipos({
   estado: string
   categoriaId: string
   ambienteId: string
+  ambienteIds?: string[]
+  sinUbicacion?: boolean
   ordenReciente?: boolean
 }) {
   let consulta = supabase
@@ -192,7 +201,14 @@ export async function listarEquipos({
     consulta = consulta.eq('estado_operativo', estado).eq('situacion', 'activo')
   }
   if (categoriaId) consulta = consulta.eq('categoria_id', categoriaId)
-  if (ambienteId) consulta = consulta.eq('ambiente_id', ambienteId)
+  if (ambienteId) {
+    consulta = consulta.eq('ambiente_id', ambienteId)
+  } else if (sinUbicacion) {
+    consulta = consulta.is('ambiente_id', null)
+  } else if (ambienteIds) {
+    if (!ambienteIds.length) return { equipos: [], total: 0 }
+    consulta = consulta.in('ambiente_id', ambienteIds)
+  }
 
   const { data, error, count } = await consulta
   if (error) throw error
@@ -254,7 +270,7 @@ export async function listarEquiposParaExportar(filtros: {
     supabase.from('categorias_equipos').select('id, nombre'),
     supabase
       .from('ambientes')
-      .select('id, codigo, nombre, pisos!inner(nombre, pabellones!inner(nombre))'),
+      .select('id, codigo, nombre, pisos!inner(id, nombre, pabellones!inner(id, nombre))'),
   ])
   if (categoriasResult.error) throw categoriasResult.error
   if (ambientesResult.error) throw ambientesResult.error
@@ -264,10 +280,12 @@ export async function listarEquiposParaExportar(filtros: {
       id: string
       codigo: string
       nombre: string
-      pisos: { nombre: string; pabellones: { nombre: string } }
+      pisos: { id: string; nombre: string; pabellones: { id: string; nombre: string } }
     }
     return {
       id: fila.id,
+      piso_id: fila.pisos.id,
+      pabellon_id: fila.pisos.pabellones.id,
       codigo: fila.codigo,
       nombre: fila.nombre,
       piso: fila.pisos.nombre,

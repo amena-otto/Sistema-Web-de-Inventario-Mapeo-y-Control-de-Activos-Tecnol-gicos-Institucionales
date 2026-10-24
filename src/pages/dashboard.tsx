@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
@@ -45,14 +45,15 @@ function TarjetaIndicador({
   to: string
 }) {
   return (
-    <Link to={to} className="block rounded-xl border border-slate-200/80 bg-white p-5 shadow-[0_4px_16px_rgba(15,41,71,0.04)] transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+    <Link to={to} className="group relative block overflow-hidden rounded-2xl border border-slate-200/80 bg-white p-5 shadow-[0_4px_16px_rgba(51,37,29,0.04)] transition duration-200 hover:-translate-y-1 hover:border-orange-200 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-orange-500">
+      <span aria-hidden="true" className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-orange-500 to-amber-300 opacity-0 transition group-hover:opacity-100" />
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-sm font-medium text-slate-500">{etiqueta}</p>
-          <p className="mt-3 text-3xl font-bold tracking-tight text-[#17395e]">{cantidad.toLocaleString('es-PE')}</p>
+          <p className="mt-3 text-3xl font-bold tracking-tight text-[#33251d]">{cantidad.toLocaleString('es-PE')}</p>
           <p className="mt-1 text-xs text-slate-500">{detalle}</p>
         </div>
-        <span className={`flex h-11 w-11 items-center justify-center rounded-xl ${tono}`}>
+        <span className={`flex h-11 w-11 items-center justify-center rounded-xl ${tono} transition duration-200 group-hover:scale-105`}>
           <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" className="h-5 w-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
             <path d={icono} />
           </svg>
@@ -74,10 +75,10 @@ function Panel({
   accion?: ReactNode
 }) {
   return (
-    <section className="rounded-xl border border-slate-200/80 bg-white p-5 shadow-[0_4px_16px_rgba(15,41,71,0.04)] sm:p-6">
-      <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+    <section className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-[0_8px_28px_rgba(51,37,29,0.045)] sm:p-6">
+      <div className="mb-5 flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-4">
         <div>
-          <h2 className="font-bold text-[#17395e]">{titulo}</h2>
+          <h2 className="font-bold text-[#33251d]">{titulo}</h2>
           <p className="mt-1 text-xs text-slate-500">{subtitulo}</p>
         </div>
         {accion}
@@ -99,20 +100,25 @@ export default function Dashboard() {
   const [resumen, setResumen] = useState<ResumenDashboard | null>(null)
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState('')
+  const solicitudCarga = useRef(0)
 
   const cargar = useCallback(async () => {
+    const solicitudActual = ++solicitudCarga.current
     setCargando(true)
     setError('')
     try {
-      setResumen(await obtenerResumenDashboard(puedeVerMantenimientos, filtros))
+      const resultado = await obtenerResumenDashboard(puedeVerMantenimientos, filtros)
+      if (solicitudActual === solicitudCarga.current) setResumen(resultado)
     } catch (e) {
-      setError(
-        e instanceof Error && e.message
-          ? e.message
-          : 'No se pudo cargar el resumen del inventario.',
-      )
+      if (solicitudActual === solicitudCarga.current) {
+        setError(
+          e instanceof Error && e.message
+            ? e.message
+            : 'No se pudo cargar el resumen del inventario.',
+        )
+      }
     } finally {
-      setCargando(false)
+      if (solicitudActual === solicitudCarga.current) setCargando(false)
     }
   }, [puedeVerMantenimientos, filtros])
 
@@ -135,9 +141,16 @@ export default function Dashboard() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'categorias_equipos' }, () => {
         if (vigente) void cargar()
       })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pisos' }, () => {
+        if (vigente) void cargar()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pabellones' }, () => {
+        if (vigente) void cargar()
+      })
       .subscribe()
     return () => {
       vigente = false
+      solicitudCarga.current += 1
       void supabase.removeChannel(canal)
     }
   }, [cargar])
@@ -163,17 +176,34 @@ export default function Dashboard() {
     ? coloresEstado.map((estado) => ({ ...estado, cantidad: Math.max(0, estado.valor(resumen)) }))
     : []
   const totalEstado = valoresEstados.reduce((total, estado) => total + estado.cantidad, 0)
+  const ambientesDelFiltro = resumen
+    ? filtros.ambienteId
+      ? [filtros.ambienteId]
+      : filtros.pabellonId || filtros.pisoId
+        ? resumen.ubicaciones.map((ubicacion) => ubicacion.id)
+        : []
+    : []
+
+  function enlaceEquipos(parametros: Record<string, string>, ambientesIds = ambientesDelFiltro) {
+    const query = new URLSearchParams({ historial: 'completo', ...parametros })
+    if (ambientesIds.length === 1) {
+      query.set('ambiente', ambientesIds[0])
+    } else {
+      ambientesIds.forEach((id) => query.append('ambientes', id))
+    }
+    return `/equipos?${query.toString()}`
+  }
 
   return (
-    <div className="space-y-6">
-      <section className="relative overflow-hidden rounded-2xl bg-[#15395f] px-6 py-7 text-white shadow-lg shadow-blue-950/10 sm:px-8 sm:py-9">
+    <div className="space-y-6 pb-2">
+      <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#33251d] via-[#432d20] to-[#6b351b] px-6 py-7 text-white shadow-xl shadow-orange-950/10 sm:px-8 sm:py-9">
         <div aria-hidden="true" className="pointer-events-none absolute -right-12 -top-24 h-72 w-72 rounded-full border-[36px] border-white/[0.045]" />
         <div aria-hidden="true" className="pointer-events-none absolute -bottom-36 right-44 h-64 w-64 rounded-full border-[28px] border-amber-300/[0.08]" />
         <div className="relative flex flex-wrap items-end justify-between gap-6">
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-amber-200">Panel de gestión institucional</p>
             <h1 className="mt-3 text-2xl font-bold tracking-tight sm:text-3xl">Bienvenido, {nombre}</h1>
-            <p className="mt-2 max-w-xl text-sm leading-relaxed text-blue-100/80">
+            <p className="mt-2 max-w-xl text-sm leading-relaxed text-orange-50/85">
               Consulta el estado de los activos tecnológicos y las principales novedades del instituto en un solo lugar.
             </p>
           </div>
@@ -184,7 +214,7 @@ export default function Dashboard() {
               </svg>
             </span>
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-blue-100/60">Hoy</p>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-orange-100/70">Hoy</p>
               <p className="mt-0.5 text-sm font-medium capitalize">{fechaInstitucional()}</p>
             </div>
           </div>
@@ -206,13 +236,13 @@ export default function Dashboard() {
         </div>
       ) : resumen ? (
         <>
-          <section aria-label="Filtros de ubicación" className="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-4">
+          <section aria-label="Filtros de ubicación" className="grid gap-3 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-[0_4px_16px_rgba(51,37,29,0.035)] sm:grid-cols-2 lg:grid-cols-4">
             <label className="text-sm font-medium text-slate-700">
               Pabellón
               <select
                 value={filtros.pabellonId}
                 onChange={(event) => setFiltros({ pabellonId: event.target.value, pisoId: '', ambienteId: '' })}
-                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2"
+                className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2.5 outline-none transition focus:border-orange-400 focus:ring-4 focus:ring-orange-100"
               >
                 <option value="">Todos los pabellones</option>
                 {resumen.opcionesPabellon.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}
@@ -224,7 +254,7 @@ export default function Dashboard() {
                 value={filtros.pisoId}
                 onChange={(event) => setFiltros((actual) => ({ ...actual, pisoId: event.target.value, ambienteId: '' }))}
                 disabled={!filtros.pabellonId}
-                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 disabled:bg-slate-100"
+                className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2.5 outline-none transition focus:border-orange-400 focus:ring-4 focus:ring-orange-100 disabled:bg-slate-100"
               >
                 <option value="">Todos los pisos</option>
                 {resumen.opcionesPiso.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}
@@ -236,7 +266,7 @@ export default function Dashboard() {
                 value={filtros.ambienteId}
                 onChange={(event) => setFiltros((actual) => ({ ...actual, ambienteId: event.target.value }))}
                 disabled={!filtros.pisoId}
-                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 disabled:bg-slate-100"
+                className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2.5 outline-none transition focus:border-orange-400 focus:ring-4 focus:ring-orange-100 disabled:bg-slate-100"
               >
                 <option value="">Todos los ambientes</option>
                 {resumen.opcionesAmbiente.map((item) => <option key={item.id} value={item.id}>{item.codigo} — {item.nombre}</option>)}
@@ -247,7 +277,7 @@ export default function Dashboard() {
                 type="button"
                 onClick={() => setFiltros({ pabellonId: '', pisoId: '', ambienteId: '' })}
                 disabled={!filtros.pabellonId && !filtros.pisoId && !filtros.ambienteId}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-orange-200 hover:bg-orange-50/60 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Limpiar filtros
               </button>
@@ -259,9 +289,9 @@ export default function Dashboard() {
               etiqueta="Equipos registrados"
               cantidad={resumen.totalEquipos}
               detalle={`${resumen.equiposActivos.toLocaleString('es-PE')} activos en el inventario`}
-              tono="bg-blue-50 text-[#1c5286]"
+              tono="bg-orange-50 text-orange-700"
               icono="M4 5h16v11H4zM8 20h8M12 16v4"
-              to="/equipos"
+              to={enlaceEquipos({})}
             />
             <TarjetaIndicador
               etiqueta="Operativos"
@@ -269,15 +299,15 @@ export default function Dashboard() {
               detalle="Equipos disponibles para uso"
               tono="bg-emerald-50 text-emerald-700"
               icono="m5 12 4 4L19 6"
-              to="/equipos?estado=operativo"
+              to={enlaceEquipos({ estado: 'operativo' })}
             />
             <TarjetaIndicador
               etiqueta="En mantenimiento"
               cantidad={resumen.equiposMantenimiento}
-              detalle="Equipos con intervención activa"
+              detalle="Activos con estado operativo de mantenimiento"
               tono="bg-amber-50 text-amber-700"
               icono="M14.5 6.5a4 4 0 0 0-5 5L4 17l3 3 5.5-5.5a4 4 0 0 0 5-5l-2.5 2.5-3-3z"
-              to="/equipos?estado=en_mantenimiento"
+              to={enlaceEquipos({ estado: 'en_mantenimiento' })}
             />
             <TarjetaIndicador
               etiqueta="En almacén"
@@ -285,7 +315,7 @@ export default function Dashboard() {
               detalle="Equipos almacenados"
               tono="bg-violet-50 text-violet-700"
               icono="M3 10h18M5 10V5h14v5M5 10v9h14v-9M9 19v-5h6v5"
-              to="/equipos?estado=en_almacen"
+              to={enlaceEquipos({ estado: 'en_almacen' })}
             />
             <TarjetaIndicador
               etiqueta="Dados de baja"
@@ -293,7 +323,7 @@ export default function Dashboard() {
               detalle="Registros conservados en historial"
               tono="bg-rose-50 text-rose-700"
               icono="M5 7h14M10 11v6m4-6v6M6 7l1 13h10l1-13M9 7V4h6v3"
-              to="/equipos?estado=baja"
+              to={enlaceEquipos({ estado: 'baja' })}
             />
             <TarjetaIndicador
               etiqueta="Inoperativos"
@@ -301,7 +331,7 @@ export default function Dashboard() {
               detalle="Requieren evaluación o atención"
               tono="bg-slate-100 text-slate-700"
               icono="M12 8v5m0 4h.01M10.3 4.9 2.8 18a1.5 1.5 0 0 0 1.3 2.2h15.8a1.5 1.5 0 0 0 1.3-2.2L13.7 4.9a2 2 0 0 0-3.4 0Z"
-              to="/equipos?estado=inoperativo"
+              to={enlaceEquipos({ estado: 'inoperativo' })}
             />
             {resumen.mantenimientos && (
               <TarjetaIndicador
@@ -327,15 +357,19 @@ export default function Dashboard() {
                       <h3 className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-500">Por pabellón</h3>
                       <div className="space-y-3">
                         {resumen.pabellones.map((pabellon) => (
-                          <div key={pabellon.id}>
+                          <Link
+                            key={pabellon.id}
+                            to={enlaceEquipos({}, pabellon.ambientesIds)}
+                            className="block rounded-md p-1 transition hover:bg-orange-50 focus-visible:outline-2 focus-visible:outline-orange-500"
+                          >
                             <div className="flex justify-between gap-3 text-sm">
                               <span className="truncate text-slate-700">{pabellon.nombre}</span>
-                              <span className="font-bold tabular-nums text-[#17395e]">{pabellon.cantidad}</span>
+                              <span className="font-bold tabular-nums text-[#33251d]">{pabellon.cantidad}</span>
                             </div>
                             <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white">
-                              <div className="h-full rounded-full bg-[#1c5286]" style={{ width: `${(pabellon.cantidad / maxPabellon) * 100}%` }} />
+                              <div className="h-full rounded-full bg-orange-600" style={{ width: `${(pabellon.cantidad / maxPabellon) * 100}%` }} />
                             </div>
-                          </div>
+                          </Link>
                         ))}
                       </div>
                     </div>
@@ -345,15 +379,19 @@ export default function Dashboard() {
                       <h3 className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-500">Por piso</h3>
                       <div className="space-y-3">
                         {resumen.pisos.map((piso) => (
-                          <div key={piso.id}>
+                          <Link
+                            key={piso.id}
+                            to={enlaceEquipos({}, piso.ambientesIds)}
+                            className="block rounded-md p-1 transition hover:bg-orange-50 focus-visible:outline-2 focus-visible:outline-orange-500"
+                          >
                             <div className="flex justify-between gap-3 text-sm">
                               <span className="truncate text-slate-700">{piso.pabellon} / {piso.nombre}</span>
-                              <span className="font-bold tabular-nums text-[#17395e]">{piso.cantidad}</span>
+                              <span className="font-bold tabular-nums text-[#33251d]">{piso.cantidad}</span>
                             </div>
                             <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white">
-                              <div className="h-full rounded-full bg-[#4b86b9]" style={{ width: `${(piso.cantidad / maxPiso) * 100}%` }} />
+                              <div className="h-full rounded-full bg-orange-400" style={{ width: `${(piso.cantidad / maxPiso) * 100}%` }} />
                             </div>
-                          </div>
+                          </Link>
                         ))}
                       </div>
                     </div>
@@ -361,7 +399,7 @@ export default function Dashboard() {
                   {resumen.ubicaciones.map((ubicacion) => (
                     <Link
                       key={ubicacion.id}
-                      to={`/equipos?ambiente=${encodeURIComponent(ubicacion.id)}`}
+                      to={enlaceEquipos({}, [ubicacion.id])}
                       className="block rounded-lg border border-slate-100 p-3 transition hover:border-blue-200 hover:bg-blue-50/50"
                     >
                       <div className="flex items-start justify-between gap-3">
@@ -373,16 +411,31 @@ export default function Dashboard() {
                             {ubicacion.codigo} — {ubicacion.ambiente}
                           </p>
                         </div>
-                        <span className="text-sm font-bold tabular-nums text-[#17395e]">{ubicacion.cantidad}</span>
+                        <span className="text-sm font-bold tabular-nums text-[#33251d]">{ubicacion.cantidad}</span>
                       </div>
                       <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
                         <div
-                          className="h-full rounded-full bg-gradient-to-r from-[#1c5286] to-[#4b86b9] transition-all duration-500"
+                          className="h-full rounded-full bg-gradient-to-r from-orange-600 to-orange-400 transition-all duration-500"
                           style={{ width: `${(ubicacion.cantidad / maxUbicacion) * 100}%` }}
                         />
                       </div>
                     </Link>
                   ))}
+                  {resumen.equiposSinUbicacion > 0 && (
+                    <Link
+                      to={enlaceEquipos({ sinUbicacion: 'true' }, [])}
+                      className="block rounded-lg border border-dashed border-slate-300 p-3 transition hover:border-orange-300 hover:bg-orange-50/50"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm font-semibold text-slate-700">Sin ubicación activa</span>
+                        <span className="text-sm font-bold tabular-nums text-[#33251d]">{resumen.equiposSinUbicacion}</span>
+                      </div>
+                      <p className="mt-1 text-xs text-slate-500">Incluye equipos sin ambiente asignado o cuya ubicación ya no está registrada.</p>
+                    </Link>
+                  )}
+                  <p className="border-t border-slate-100 pt-3 text-xs text-slate-500">
+                    Total: {resumen.totalEquipos.toLocaleString('es-PE')} equipos · distribución por ubicación y sin ubicación activa.
+                  </p>
                 </div>
               ) : (
                 <div className="rounded-lg bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
@@ -400,16 +453,16 @@ export default function Dashboard() {
                   {resumen.categorias.map((categoria) => (
                     <Link
                       key={categoria.id}
-                      to={`/equipos?categoria=${encodeURIComponent(categoria.id)}`}
+                      to={enlaceEquipos({ categoria: categoria.id })}
                       className="block rounded-lg p-2 transition hover:bg-blue-50/60"
                     >
                       <div className="flex items-center justify-between gap-3">
                         <span className="truncate text-sm font-medium text-slate-700">{categoria.nombre}</span>
-                        <span className="text-sm font-bold tabular-nums text-[#17395e]">{categoria.cantidad}</span>
+                        <span className="text-sm font-bold tabular-nums text-[#33251d]">{categoria.cantidad}</span>
                       </div>
                       <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
                         <div
-                          className="h-full rounded-full bg-[#4b86b9] transition-all duration-500"
+                          className="h-full rounded-full bg-orange-400 transition-all duration-500"
                           style={{ width: `${(categoria.cantidad / maxCategoria) * 100}%` }}
                         />
                       </div>
@@ -424,33 +477,42 @@ export default function Dashboard() {
             </Panel>
           </section>
 
-          <section className="grid gap-6 xl:grid-cols-[1fr_1.45fr]">
+          <section className="grid gap-6">
             <Panel
               titulo="Estado de los equipos"
               subtitulo="Distribución de los registros por situación"
             >
               {totalEstado > 0 ? (
-                <>
-                  <div className="flex h-3 overflow-hidden rounded-full bg-slate-100" aria-label="Gráfico de distribución por estado">
-                    {valoresEstados.filter((estado) => estado.cantidad > 0).map((estado) => (
-                      <div
-                        key={estado.nombre}
-                        className={`${estado.color} h-full`}
-                        style={{ width: `${(estado.cantidad / totalEstado) * 100}%` }}
-                        title={`${estado.nombre}: ${estado.cantidad}`}
-                      />
-                    ))}
+                <div className="grid gap-5 lg:grid-cols-[minmax(220px,0.8fr)_minmax(0,1.8fr)] lg:items-center">
+                  <div className="rounded-2xl bg-gradient-to-br from-orange-50 to-amber-50/60 p-5">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-orange-800/70">Total de equipos</p>
+                    <p className="mt-2 text-4xl font-bold tracking-tight text-[#33251d]">{totalEstado.toLocaleString('es-PE')}</p>
+                    <p className="mt-1 text-xs text-slate-500">Distribución actual por situación</p>
+                    <div className="mt-5 flex h-3 overflow-hidden rounded-full bg-white shadow-inner" aria-label="Gráfico de distribución por estado">
+                      {valoresEstados.filter((estado) => estado.cantidad > 0).map((estado) => (
+                        <div
+                          key={estado.nombre}
+                          className={`${estado.color} h-full`}
+                          style={{ width: `${(estado.cantidad / totalEstado) * 100}%` }}
+                          title={`${estado.nombre}: ${estado.cantidad}`}
+                        />
+                      ))}
+                    </div>
+                    <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
+                      <span>Estado del inventario</span>
+                      <span className="font-semibold text-slate-700">100%</span>
+                    </div>
                   </div>
-                  <div className="mt-6 space-y-2">
+                  <div className="grid gap-2 sm:grid-cols-2">
                     {valoresEstados.map((estado) => (
                       <Link
                         key={estado.nombre}
-                        to={`/equipos?estado=${estado.estado}`}
-                        className="flex items-center justify-between gap-3 rounded-lg px-2 py-2 transition hover:bg-blue-50/60"
+                        to={enlaceEquipos({ estado: estado.estado })}
+                        className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50/50 px-3 py-3 transition hover:border-orange-200 hover:bg-orange-50/60 focus-visible:outline-2 focus-visible:outline-orange-500"
                       >
                         <span className="flex items-center gap-2.5">
                           <span className={`h-2.5 w-2.5 rounded-full ${estado.color}`} />
-                          <span className="text-sm text-slate-600">{estado.nombre}</span>
+                          <span className="text-sm font-medium text-slate-600">{estado.nombre}</span>
                         </span>
                         <span className="flex items-center gap-3">
                           <span className="text-xs text-slate-400">{Math.round((estado.cantidad / totalEstado) * 100)}%</span>
@@ -459,10 +521,7 @@ export default function Dashboard() {
                       </Link>
                     ))}
                   </div>
-                  <div className="mt-4 border-t border-slate-100 pt-4 text-xs text-slate-500">
-                    Total de equipos: <strong className="text-slate-700">{totalEstado.toLocaleString('es-PE')}</strong>
-                  </div>
-                </>
+                </div>
               ) : (
                 <div className="rounded-lg bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
                   No hay equipos que coincidan con los filtros.
@@ -476,7 +535,7 @@ export default function Dashboard() {
               <Panel
                 titulo="Resumen de mantenimientos"
                 subtitulo="Intervenciones técnicas registradas según su estado"
-                accion={<Link to="/mantenimientos" className="text-xs font-semibold text-[#1c5286] hover:underline">Ver mantenimientos →</Link>}
+                accion={<Link to="/mantenimientos" className="text-xs font-semibold text-orange-700 hover:underline">Ver mantenimientos →</Link>}
               >
                 <div className="grid gap-3 sm:grid-cols-3">
                   {[
@@ -509,26 +568,26 @@ export default function Dashboard() {
               <div className="grid gap-3">
                 <Link to="/equipos" className="group flex items-center justify-between rounded-lg border border-slate-200 p-4 transition hover:border-blue-200 hover:bg-blue-50/60">
                   <span>
-                    <span className="block text-sm font-semibold text-[#17395e]">Consultar inventario</span>
+                    <span className="block text-sm font-semibold text-[#33251d]">Consultar inventario</span>
                     <span className="mt-1 block text-xs text-slate-500">Buscar y revisar equipos registrados</span>
                   </span>
-                  <span className="text-lg text-slate-400 transition group-hover:translate-x-1 group-hover:text-[#1c5286]">→</span>
+                  <span className="text-lg text-slate-400 transition group-hover:translate-x-1 group-hover:text-orange-700">→</span>
                 </Link>
                 {puedeVerMantenimientos && (
                   <Link to="/mantenimientos" className="group flex items-center justify-between rounded-lg border border-slate-200 p-4 transition hover:border-blue-200 hover:bg-blue-50/60">
                     <span>
-                      <span className="block text-sm font-semibold text-[#17395e]">Gestionar mantenimiento</span>
+                      <span className="block text-sm font-semibold text-[#33251d]">Gestionar mantenimiento</span>
                       <span className="mt-1 block text-xs text-slate-500">Registrar o consultar intervenciones</span>
                     </span>
-                    <span className="text-lg text-slate-400 transition group-hover:translate-x-1 group-hover:text-[#1c5286]">→</span>
+                    <span className="text-lg text-slate-400 transition group-hover:translate-x-1 group-hover:text-orange-700">→</span>
                   </Link>
                 )}
                 <Link to="/ubicaciones" className="group flex items-center justify-between rounded-lg border border-slate-200 p-4 transition hover:border-blue-200 hover:bg-blue-50/60">
                   <span>
-                    <span className="block text-sm font-semibold text-[#17395e]">Ver ubicaciones</span>
+                    <span className="block text-sm font-semibold text-[#33251d]">Ver ubicaciones</span>
                     <span className="mt-1 block text-xs text-slate-500">Explorar ambientes y mapa institucional</span>
                   </span>
-                  <span className="text-lg text-slate-400 transition group-hover:translate-x-1 group-hover:text-[#1c5286]">→</span>
+                  <span className="text-lg text-slate-400 transition group-hover:translate-x-1 group-hover:text-orange-700">→</span>
                 </Link>
               </div>
             </Panel>

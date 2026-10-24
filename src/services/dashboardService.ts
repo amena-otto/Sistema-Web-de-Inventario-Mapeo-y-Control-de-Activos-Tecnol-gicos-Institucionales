@@ -11,8 +11,8 @@ export type ResumenDashboard = {
   equiposMantenimiento: number
   equiposInoperativos: number
   categorias: { id: string; nombre: string; cantidad: number }[]
-  pabellones: { id: string; nombre: string; cantidad: number }[]
-  pisos: { id: string; nombre: string; pabellon: string; cantidad: number }[]
+  pabellones: { id: string; nombre: string; cantidad: number; ambientesIds: string[] }[]
+  pisos: { id: string; nombre: string; pabellon: string; cantidad: number; ambientesIds: string[] }[]
   ubicaciones: {
     id: string
     pabellon: string
@@ -24,6 +24,7 @@ export type ResumenDashboard = {
   opcionesPabellon: { id: string; nombre: string }[]
   opcionesPiso: { id: string; nombre: string }[]
   opcionesAmbiente: { id: string; codigo: string; nombre: string }[]
+  equiposSinUbicacion: number
   mantenimientos: {
     total: number
     pendientes: number
@@ -45,6 +46,7 @@ type AmbienteDashboard = {
   id: string
   codigo: string
   nombre: string
+  activo: boolean
   pisos: { id: string; nombre: string; pabellones: { id: string; nombre: string } }
 }
 
@@ -127,8 +129,7 @@ export async function obtenerResumenDashboard(
   const [ambientesResult, categoriasResult] = await Promise.all([
     supabase
       .from('ambientes')
-      .select('id, codigo, nombre, pisos!inner(id, nombre, pabellones!inner(id, nombre))')
-      .eq('activo', true),
+      .select('id, codigo, nombre, activo, pisos!inner(id, nombre, pabellones!inner(id, nombre))'),
     supabase.from('categorias_equipos').select('id, nombre'),
   ])
   if (ambientesResult.error) throw ambientesResult.error
@@ -174,6 +175,9 @@ export async function obtenerResumenDashboard(
     id,
     nombre: pabellonesMap.get(id) ?? 'Sin pabellón',
     cantidad: 0,
+    ambientesIds: ambientesFiltrados
+      .filter((ambiente) => ambiente.pisos.pabellones.id === id)
+      .map((ambiente) => ambiente.id),
   }))
   const pabellonesPorId = new Map(pabellones.map((pabellon) => [pabellon.id, pabellon]))
   const pisos = [...new Set(ambientesFiltrados.map((ambiente) => ambiente.pisos.id))]
@@ -184,6 +188,9 @@ export async function obtenerResumenDashboard(
         nombre: piso?.nombre ?? 'Sin piso',
         pabellon: piso ? pabellonesMap.get(piso.pabellonId) ?? 'Sin pabellón' : 'Sin pabellón',
         cantidad: 0,
+        ambientesIds: ambientesFiltrados
+          .filter((ambiente) => ambiente.pisos.id === id)
+          .map((ambiente) => ambiente.id),
       }
     })
   const pisosPorId = new Map(pisos.map((piso) => [piso.id, piso]))
@@ -209,10 +216,25 @@ export async function obtenerResumenDashboard(
   let equiposAlmacen = 0
   let equiposMantenimiento = 0
   let equiposInoperativos = 0
+  let equiposSinUbicacion = 0
 
   for (const equipo of equiposFiltrados) {
     const categoria = categoriasPorId.get(equipo.categoria_id)
     if (categoria) categoria.cantidad += 1
+
+    const ambiente = equipo.ambiente_id
+      ? ambientesPorId.get(equipo.ambiente_id)
+      : undefined
+    if (!ambiente) {
+      equiposSinUbicacion += 1
+    } else {
+      const ubicacion = ubicacionesMap.get(ambiente.id)
+      if (ubicacion) ubicacion.cantidad += 1
+      const pabellon = pabellonesPorId.get(ambiente.pisos.pabellones.id)
+      if (pabellon) pabellon.cantidad += 1
+      const piso = pisosPorId.get(ambiente.pisos.id)
+      if (piso) piso.cantidad += 1
+    }
 
     if (equipo.situacion === 'baja') {
       equiposBaja += 1
@@ -231,17 +253,6 @@ export async function obtenerResumenDashboard(
     if (equipo.estado_operativo === 'en_mantenimiento') equiposMantenimiento += 1
     if (equipo.estado_operativo === 'inoperativo') equiposInoperativos += 1
 
-    if (equipo.ambiente_id) {
-      const ubicacion = ubicacionesMap.get(equipo.ambiente_id)
-      if (ubicacion) ubicacion.cantidad += 1
-      const ambiente = ambientesPorId.get(equipo.ambiente_id)
-      if (ambiente) {
-        const pabellon = pabellonesPorId.get(ambiente.pisos.pabellones.id)
-        if (pabellon) pabellon.cantidad += 1
-        const piso = pisosPorId.get(ambiente.pisos.id)
-        if (piso) piso.cantidad += 1
-      }
-    }
   }
 
   const hayFiltroUbicacion = Boolean(
@@ -300,15 +311,24 @@ export async function obtenerResumenDashboard(
         a.piso.localeCompare(b.piso) ||
         a.codigo.localeCompare(b.codigo),
     ),
+    equiposSinUbicacion,
     opcionesPabellon: [...pabellonesMap.entries()]
+      .filter(([id]) => ambientes.some((ambiente) =>
+        ambiente.activo && ambiente.pisos.pabellones.id === id,
+      ))
       .map(([id, nombre]) => ({ id, nombre }))
       .sort((a, b) => a.nombre.localeCompare(b.nombre)),
     opcionesPiso: [...pisosMap.entries()]
-      .filter(([, piso]) => !filtros.pabellonId || piso.pabellonId === filtros.pabellonId)
+      .filter(([id, piso]) =>
+        (!filtros.pabellonId || piso.pabellonId === filtros.pabellonId) &&
+        ambientes.some((ambiente) => ambiente.activo && ambiente.pisos.id === id),
+      )
       .map(([id, piso]) => ({ id, nombre: piso.nombre }))
       .sort((a, b) => a.nombre.localeCompare(b.nombre)),
     opcionesAmbiente: ambientesFiltrados
-      .filter((ambiente) => !filtros.pisoId || ambiente.pisos.id === filtros.pisoId)
+      .filter((ambiente) =>
+        ambiente.activo && (!filtros.pisoId || ambiente.pisos.id === filtros.pisoId),
+      )
       .map(({ id, codigo, nombre }) => ({ id, codigo, nombre }))
       .sort((a, b) => a.codigo.localeCompare(b.codigo)),
     mantenimientos,

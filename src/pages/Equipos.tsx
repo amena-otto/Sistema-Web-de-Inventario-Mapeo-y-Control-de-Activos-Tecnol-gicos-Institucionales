@@ -64,6 +64,12 @@ const etiquetasTecnicas = [
   ['Almacenamiento', 'Almacenamiento (tipo y capacidad)'],
   ['Sistema operativo', 'Sistema operativo'],
 ] as const
+const tiposFotografia = new Set(['image/jpeg', 'image/png', 'image/webp'])
+
+type ArchivoConVista = {
+  archivo: File
+  vista: string
+}
 
 function mostrarError(error: unknown, fallback: string) {
   if (error instanceof Error && error.message) return error.message
@@ -80,6 +86,12 @@ function mostrarError(error: unknown, fallback: string) {
 
 function fechaCorta(value: string | null) {
   return value ? new Date(`${value.slice(0, 10)}T00:00:00`).toLocaleDateString() : '—'
+}
+
+function formatoPeso(bytes: number) {
+  return bytes < 1024 * 1024
+    ? `${Math.max(1, Math.round(bytes / 1024))} KB`
+    : `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 function normalizarCsv(valor: string) {
@@ -226,6 +238,8 @@ export default function Equipos() {
   const [estado, setEstado] = useState(() => searchParams.get('estado') ?? '')
   const [categoriaFiltro, setCategoriaFiltro] = useState(() => searchParams.get('categoria') ?? '')
   const [ambienteFiltro, setAmbienteFiltro] = useState(() => searchParams.get('ambiente') ?? '')
+  const [ambienteFiltrosIds, setAmbienteFiltrosIds] = useState(() => searchParams.getAll('ambientes'))
+  const [sinUbicacionFiltro, setSinUbicacionFiltro] = useState(() => searchParams.get('sinUbicacion') === 'true')
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState('')
   const [aviso, setAviso] = useState('')
@@ -248,10 +262,12 @@ export default function Equipos() {
   const [componenteTipo, setComponenteTipo] = useState('')
   const [componenteDetalle, setComponenteDetalle] = useState('')
   const [equipoRelacionado, setEquipoRelacionado] = useState('')
-  const [foto, setFoto] = useState<File | null>(null)
-  const [fotoAdicional, setFotoAdicional] = useState<File | null>(null)
+  const [foto, setFoto] = useState<ArchivoConVista | null>(null)
+  const [fotoAdicional, setFotoAdicional] = useState<ArchivoConVista[]>([])
   const [gestionandoFoto, setGestionandoFoto] = useState(false)
   const fotoInputRef = useRef<HTMLInputElement>(null)
+  const fotoAdicionalInputRef = useRef<HTMLInputElement>(null)
+  const vistasPendientes = useRef(new Set<string>())
   const [importando, setImportando] = useState(false)
   const [exportando, setExportando] = useState(false)
   const [resultadoImportacion, setResultadoImportacion] = useState<string[]>([])
@@ -264,6 +280,28 @@ export default function Equipos() {
     },
     [fotografias],
   )
+
+  useEffect(
+    () => () => {
+      vistasPendientes.current.forEach((vista) => URL.revokeObjectURL(vista))
+      vistasPendientes.current.clear()
+    },
+    [],
+  )
+
+  useEffect(() => {
+    if (!modalAbierto) return
+    const overflowAnterior = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    function cerrarConEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape' && !guardando) setModalAbierto(false)
+    }
+    window.addEventListener('keydown', cerrarConEscape)
+    return () => {
+      document.body.style.overflow = overflowAnterior
+      window.removeEventListener('keydown', cerrarConEscape)
+    }
+  }, [modalAbierto, guardando])
 
   useEffect(() => {
     let vigente = true
@@ -291,6 +329,8 @@ export default function Equipos() {
       estado,
       categoriaId: categoriaFiltro,
       ambienteId: ambienteFiltro,
+      ambienteIds: ambienteFiltrosIds.length ? ambienteFiltrosIds : undefined,
+      sinUbicacion: sinUbicacionFiltro,
       ordenReciente: !verHistorialCompleto,
     })
       .then((resultado) => {
@@ -307,7 +347,7 @@ export default function Equipos() {
     return () => {
       vigente = false
     }
-  }, [pagina, busqueda, estado, categoriaFiltro, ambienteFiltro, actualizacion, verHistorialCompleto])
+  }, [pagina, busqueda, estado, categoriaFiltro, ambienteFiltro, ambienteFiltrosIds, sinUbicacionFiltro, actualizacion, verHistorialCompleto])
 
   const paginas = Math.max(1, Math.ceil(total / porPagina))
   const categoriasPorId = useMemo(
@@ -328,19 +368,73 @@ export default function Equipos() {
       ),
     [responsables],
   )
+  const fotografiaPrincipal = fotografias.find((fotografia) => fotografia.tipo === 'principal')
+
+  function crearVistaArchivo(archivo: File): ArchivoConVista {
+    const vista = URL.createObjectURL(archivo)
+    vistasPendientes.current.add(vista)
+    return { archivo, vista }
+  }
+
+  function liberarVistaArchivo(seleccion: ArchivoConVista) {
+    URL.revokeObjectURL(seleccion.vista)
+    vistasPendientes.current.delete(seleccion.vista)
+  }
+
+  function limpiarFotografiasPendientes() {
+    if (foto) liberarVistaArchivo(foto)
+    fotoAdicional.forEach(liberarVistaArchivo)
+    setFoto(null)
+    setFotoAdicional([])
+  }
+
+  function seleccionarFotografiaPrincipal(archivo: File | undefined) {
+    if (!archivo) return
+    if (!tiposFotografia.has(archivo.type)) {
+      setError('Selecciona una imagen JPEG, PNG o WebP para la fotografía principal.')
+      return
+    }
+    setError('')
+    if (foto) liberarVistaArchivo(foto)
+    setFoto(crearVistaArchivo(archivo))
+  }
+
+  function seleccionarFotografiasAdicionales(archivos: FileList | File[]) {
+    const seleccionadas = Array.from(archivos)
+    if (!seleccionadas.length) return
+    const invalidas = seleccionadas.filter((archivo) => !tiposFotografia.has(archivo.type))
+    if (invalidas.length) {
+      setError('Algunos archivos no son compatibles. Selecciona imágenes JPEG, PNG o WebP.')
+      if (invalidas.length === seleccionadas.length) return
+    } else {
+      setError('')
+    }
+    const validas = seleccionadas.filter((archivo) => tiposFotografia.has(archivo.type))
+    if (!validas.length) return
+    const firmas = new Set(
+      fotoAdicional.map(({ archivo }) => `${archivo.name}:${archivo.size}:${archivo.lastModified}`),
+    )
+    const nuevas = validas.filter((archivo) => {
+      const firma = `${archivo.name}:${archivo.size}:${archivo.lastModified}`
+      if (firmas.has(firma)) return false
+      firmas.add(firma)
+      return true
+    })
+    setFotoAdicional([...fotoAdicional, ...nuevas.map(crearVistaArchivo)])
+  }
 
   function iniciarNuevo() {
+    limpiarFotografiasPendientes()
     setEditando(null)
     setDatos({ ...vacio, categoria_id: categorias[0]?.id ?? '' })
     setTecnicas({})
     setDuplicados([])
-    setFoto(null)
-    setFotoAdicional(null)
     setError('')
     setModalAbierto(true)
   }
 
   async function iniciarEdicion(equipo: Equipo) {
+    limpiarFotografiasPendientes()
     setEditando(equipo)
     setDatos({
       categoria_id: equipo.categoria_id,
@@ -375,8 +469,6 @@ export default function Equipos() {
       return
     }
     setDuplicados([])
-    setFoto(null)
-    setFotoAdicional(null)
     setError('')
     setModalAbierto(true)
   }
@@ -472,10 +564,11 @@ export default function Equipos() {
           const tienePrincipal = fotografias.some((item) => item.tipo === 'principal')
           await subirFotografia(
             guardado.id,
-            foto,
+            foto.archivo,
             editando && tienePrincipal ? 'reemplazar' : 'principal',
           )
           fotoGuardada = true
+          liberarVistaArchivo(foto)
           setFoto(null)
           setAviso(
             editando
@@ -492,6 +585,31 @@ export default function Equipos() {
             await refrescarFotografias(guardado.id)
           } catch (e) {
             setError(`La fotografía se guardó, pero no se pudo actualizar la vista: ${mostrarError(e, 'error desconocido')}`)
+          }
+        }
+      }
+      if (fotoAdicional.length && !editando) {
+        const fallidas: ArchivoConVista[] = []
+        const erroresFoto: string[] = []
+        for (const seleccion of fotoAdicional) {
+          try {
+            await subirFotografia(guardado.id, seleccion.archivo, 'adicional')
+            liberarVistaArchivo(seleccion)
+          } catch (e) {
+            fallidas.push(seleccion)
+            erroresFoto.push(`${seleccion.archivo.name}: ${mostrarError(e, 'error desconocido')}`)
+          }
+        }
+        setFotoAdicional(fallidas)
+        if (erroresFoto.length) {
+          setError(`El equipo quedó guardado, pero algunas fotografías no se subieron: ${erroresFoto.join('; ')}`)
+        }
+        if (fallidas.length < fotoAdicional.length) {
+          setAviso(`Equipo ${guardado.codigo_institucional} y ${fotoAdicional.length - fallidas.length} fotografía(s) adicional(es) registradas.`)
+          try {
+            await refrescarFotografias(guardado.id)
+          } catch (e) {
+            setError(`Las fotografías se guardaron, pero no se pudo actualizar la vista: ${mostrarError(e, 'error desconocido')}`)
           }
         }
       }
@@ -583,7 +701,8 @@ export default function Equipos() {
     setAviso('')
     setGestionandoFoto(true)
     try {
-      await subirFotografia(equipoDetalle.id, foto, 'adicional')
+      await subirFotografia(equipoDetalle.id, foto.archivo, 'adicional')
+      liberarVistaArchivo(foto)
       setFoto(null)
       setAviso('Fotografía adicional agregada correctamente.')
       try {
@@ -598,23 +717,35 @@ export default function Equipos() {
     }
   }
 
-  async function agregarFotoEditando(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!editando || !fotoAdicional) return
+  async function agregarFotoEditando() {
+    if (!editando || !fotoAdicional.length) return
     setError('')
     setAviso('')
     setGestionandoFoto(true)
     try {
-      await subirFotografia(editando.id, fotoAdicional, 'adicional')
-      setFotoAdicional(null)
-      setAviso('Fotografía adicional agregada correctamente.')
-      try {
-        await refrescarFotografias(editando.id)
-      } catch (e) {
-        setError(`La fotografía se agregó, pero no se pudo actualizar la vista: ${mostrarError(e, 'error desconocido')}`)
+      const fallidas: ArchivoConVista[] = []
+      const erroresFoto: string[] = []
+      for (const seleccion of fotoAdicional) {
+        try {
+          await subirFotografia(editando.id, seleccion.archivo, 'adicional')
+          liberarVistaArchivo(seleccion)
+        } catch (e) {
+          fallidas.push(seleccion)
+          erroresFoto.push(`${seleccion.archivo.name}: ${mostrarError(e, 'error desconocido')}`)
+        }
       }
-    } catch (e) {
-      setError(mostrarError(e, 'No se pudo subir la fotografía adicional.'))
+      setFotoAdicional(fallidas)
+      if (erroresFoto.length) {
+        setError(`No se pudieron subir algunas fotografías: ${erroresFoto.join('; ')}`)
+      }
+      if (fallidas.length < fotoAdicional.length) {
+        setAviso(`${fotoAdicional.length - fallidas.length} fotografía(s) adicional(es) agregadas.`)
+        try {
+          await refrescarFotografias(editando.id)
+        } catch (e) {
+          setError(`Las fotografías se agregaron, pero no se pudo actualizar la vista: ${mostrarError(e, 'error desconocido')}`)
+        }
+      }
     } finally {
       setGestionandoFoto(false)
     }
@@ -914,7 +1045,7 @@ export default function Equipos() {
   }
 
   return (
-    <section>
+    <section className="flex flex-col gap-4">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h2 className="text-2xl font-semibold">Inventario tecnológico</h2>
@@ -936,9 +1067,9 @@ export default function Equipos() {
             <button
               type="button"
               onClick={iniciarNuevo}
-              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+              className="rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500"
             >
-              Registrar equipo
+              Nuevo equipo
             </button>
           )}
         </div>
@@ -1074,6 +1205,8 @@ export default function Equipos() {
           value={ambienteFiltro}
           onChange={(event) => {
             setAmbienteFiltro(event.target.value)
+            setAmbienteFiltrosIds([])
+            setSinUbicacionFiltro(false)
             setPagina(1)
           }}
           aria-label="Filtrar por ubicación"
@@ -1103,6 +1236,27 @@ export default function Equipos() {
           <option value="archivado">Archivado</option>
         </select>
       </div>
+
+      {(ambienteFiltrosIds.length > 0 || sinUbicacionFiltro) && (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-900">
+          <span>
+            {sinUbicacionFiltro
+              ? 'Equipos sin ubicación asignada'
+              : `Inventario filtrado por ${ambienteFiltrosIds.length} ambiente(s) del dashboard`}
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setAmbienteFiltrosIds([])
+              setSinUbicacionFiltro(false)
+              setPagina(1)
+            }}
+            className="font-semibold text-orange-800 hover:underline"
+          >
+            Quitar filtro
+          </button>
+        </div>
+      )}
 
       <div className="mt-4 overflow-x-auto rounded-xl bg-white shadow">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
@@ -1204,7 +1358,7 @@ export default function Equipos() {
       </div>
 
       {categoriaModal && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/50 p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
           <form onSubmit={(event) => void agregarCategoria(event)} className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl">
             <h3 className="text-lg font-semibold">Nueva categoría de equipo</h3>
             <p className="mt-1 text-sm text-slate-500">Ejemplos: computadoras, impresoras, redes o periféricos.</p>
@@ -1220,14 +1374,29 @@ export default function Equipos() {
       )}
 
       {modalAbierto && (
-        <div className="fixed inset-0 z-30 overflow-y-auto bg-slate-950/50 p-3 sm:p-8">
-          <section className="mx-auto max-w-4xl rounded-xl bg-white p-5 shadow-xl">
+        <div className="fixed inset-0 z-50 flex min-h-full items-start justify-center overflow-y-auto bg-slate-950/50 p-3 backdrop-blur-[2px] sm:p-6 lg:p-8">
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="formulario-equipo-titulo"
+            className="my-0 max-h-[calc(100dvh-1.5rem)] w-full max-w-5xl overflow-y-auto rounded-2xl border border-white/70 bg-white p-5 shadow-2xl sm:my-0 sm:max-h-[calc(100dvh-3rem)] sm:p-7 lg:p-8"
+          >
             <div className="flex items-center justify-between gap-3">
               <div>
-                <h3 className="text-xl font-semibold">{editando ? 'Editar equipo' : 'Registrar equipo'}</h3>
+                <h3 id="formulario-equipo-titulo" className="text-xl font-bold text-slate-900">{editando ? 'Editar equipo' : 'Crear equipo'}</h3>
                 <p className="text-sm text-slate-500">El código institucional se asigna automáticamente y no cambia al mover el activo.</p>
               </div>
-              <button type="button" onClick={() => setModalAbierto(false)} aria-label="Cerrar formulario" className="rounded border px-3 py-1">Cerrar</button>
+              <div className="flex shrink-0 items-center gap-2">
+                <button type="button" onClick={() => setModalAbierto(false)} className="rounded-lg px-3 py-2 text-sm font-medium text-slate-500 transition hover:bg-slate-100 hover:text-slate-800">Cancelar</button>
+                <button
+                  type="submit"
+                  form="formulario-equipo"
+                  disabled={guardando || !categorias.length}
+                  className="rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-600 disabled:opacity-60"
+                >
+                  {guardando ? 'Guardando...' : editando ? 'Guardar cambios' : 'Guardar equipo'}
+                </button>
+              </div>
             </div>
             {error && (
               <p role="alert" className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
@@ -1244,31 +1413,57 @@ export default function Equipos() {
                 No hay categorías activas. Un administrador debe crearlas en la gestión de categorías antes de registrar equipos.
               </p>
             )}
-            <form onSubmit={(event) => void guardarEquipo(event)} className="mt-4 space-y-5">
+            <form id="formulario-equipo" onSubmit={(event) => void guardarEquipo(event)} className="mt-4 space-y-5">
               <fieldset disabled={guardando || !categorias.length} className="space-y-5">
-                <div>
-                  <h4 className="font-semibold">Datos principales</h4>
-                  <p className="mt-1 text-sm text-slate-500">
-                    Solo el nombre y la categoría son obligatorios. Puedes completar el resto ahora o después.
-                  </p>
-                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                    <label className="text-sm">Nombre o descripción <span className="text-red-600">*</span>
-                      <input required maxLength={200} value={datos.nombre} onChange={(e) => cambiarDato('nombre', e.target.value)} placeholder="Ej. Computadora de oficina" className="mt-1 w-full rounded border border-slate-300 px-3 py-2" />
+                <div className="rounded-xl border border-slate-100 bg-white p-4 sm:p-5">
+                  <div className="border-b border-slate-100 pb-4">
+                    <h4 className="font-bold text-slate-900">Datos principales</h4>
+                    <p className="mt-1 text-sm text-slate-500">
+                      Solo el nombre y la categoría son obligatorios. Puedes completar el resto ahora o después.
+                    </p>
+                  </div>
+                  <div className="mt-4 space-y-4">
+                    <label className="grid gap-2 text-sm sm:grid-cols-[190px_minmax(0,1fr)] sm:items-center">
+                      <span className="font-semibold text-slate-700">Nombre o descripción <span className="text-orange-600">*</span></span>
+                      <input required maxLength={200} value={datos.nombre} onChange={(e) => cambiarDato('nombre', e.target.value)} placeholder="Ej. Computadora de oficina" className="w-full rounded-xl border border-slate-200 px-3.5 py-3 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-orange-400 focus:ring-4 focus:ring-orange-100" />
                     </label>
-                    <label className="text-sm">Categoría <span className="text-red-600">*</span>
-                      <select required value={datos.categoria_id} onChange={(e) => cambiarDato('categoria_id', e.target.value)} className="mt-1 w-full rounded border border-slate-300 px-3 py-2">
-                        {categorias.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}
-                      </select>
+                    <label className="grid gap-2 text-sm sm:grid-cols-[190px_minmax(0,1fr)] sm:items-center">
+                      <span className="font-semibold text-slate-700">Categoría <span className="text-orange-600">*</span></span>
+                      <span className="relative block">
+                        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400">
+                          <path d="m20 13-7 7L3 10V4h6l11 9Z" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+                          <circle cx="7.5" cy="7.5" r="1" fill="currentColor" />
+                        </svg>
+                        <select required value={datos.categoria_id} onChange={(e) => cambiarDato('categoria_id', e.target.value)} className="w-full appearance-none rounded-xl border border-slate-200 bg-white py-3 pl-10 pr-20 text-sm text-slate-800 outline-none transition focus:border-orange-400 focus:ring-4 focus:ring-orange-100">
+                          <option value="">Selecciona una categoría</option>
+                          {categorias.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}
+                        </select>
+                        <button
+                          type="button"
+                          aria-label="Quitar categoría seleccionada"
+                          disabled={!datos.categoria_id}
+                          onClick={() => cambiarDato('categoria_id', '')}
+                          className="absolute right-9 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:invisible"
+                        >
+                          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" className="h-4 w-4">
+                            <path d="m7 7 10 10M17 7 7 17" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                          </svg>
+                        </button>
+                        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500">
+                          <path d="m7 10 5 5 5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </span>
                     </label>
-                    <label className="text-sm">Estado operativo
-                      <select value={datos.estado_operativo} onChange={(e) => cambiarDato('estado_operativo', e.target.value as EstadoOperativo)} className="mt-1 w-full rounded border border-slate-300 px-3 py-2">
+                    <label className="grid gap-2 text-sm sm:grid-cols-[190px_minmax(0,1fr)] sm:items-center">
+                      <span className="font-semibold text-slate-700">Estado operativo</span>
+                      <select value={datos.estado_operativo} onChange={(e) => cambiarDato('estado_operativo', e.target.value as EstadoOperativo)} className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-sm outline-none transition focus:border-orange-400 focus:ring-4 focus:ring-orange-100">
                         {estadosOperativos.map((item) => <option key={item} value={item}>{etiquetasEstado[item]}</option>)}
                       </select>
                     </label>
                   </div>
                 </div>
 
-                <details className="rounded-lg border border-slate-200 p-4">
+                <details className="rounded-xl border border-slate-200 p-4 sm:p-5">
                   <summary className="cursor-pointer font-medium">Más datos (opcionales)</summary>
                   <div className="mt-4 space-y-5">
                     <div>
@@ -1330,91 +1525,200 @@ export default function Equipos() {
                       </div>
                     </div>
 
-                    <div>
-                      <h4 className="font-semibold">Fotografía principal</h4>
-                      <p className="mt-1 text-xs text-slate-500">
-                        {editando
-                          ? 'Selecciona una imagen para reemplazar la principal al guardar. Se optimiza antes de subirla (máximo 2 MB).'
-                          : 'La imagen se optimiza antes de subirla (máximo 2 MB).'}
+                  </div>
+                </details>
+
+                    <div className="rounded-xl border border-slate-100 bg-white p-4 sm:p-5">
+                      <h4 className="font-bold text-slate-900">Fotografías del equipo</h4>
+                      <p className="mt-1 text-sm text-slate-500">
+                        La imagen se optimiza al guardarla. Usa JPG, PNG o WebP (máximo 2 MB por imagen optimizada).
                       </p>
-                      <input
-                        ref={fotoInputRef}
-                        type="file"
-                        accept="image/jpeg,image/png,image/webp"
-                        className="sr-only"
-                        onChange={(event) => {
-                          setFoto(event.target.files?.[0] ?? null)
-                          event.currentTarget.value = ''
-                        }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => fotoInputRef.current?.click()}
-                        className="mt-2 rounded border border-slate-300 px-3 py-2 text-sm font-medium hover:bg-slate-50"
-                      >
-                        Seleccionar fotografía
-                      </button>
-                      <span className="ml-3 text-sm text-slate-600">
-                        {foto?.name ?? 'Ninguna fotografía seleccionada'}
-                      </span>
-                      {editando && (
-                        <>
-                          <div className="mt-3 flex flex-wrap gap-3">
-                            {fotografias.map((fotografia) => (
-                              <div key={fotografia.id} className="w-40">
-                                <a href={fotografia.url} target="_blank" rel="noreferrer">
-                                  <img
-                                    src={fotografia.url}
-                                    alt={fotografia.descripcion ?? `Fotografía de ${editando.codigo_institucional}`}
-                                    className="h-28 w-40 rounded-lg border object-cover"
-                                  />
-                                </a>
-                                <div className="mt-1 flex flex-wrap items-center gap-1">
-                                  <span className={`rounded px-2 py-1 text-[10px] font-semibold ${fotografia.tipo === 'principal' ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-600'}`}>
-                                    {fotografia.tipo === 'principal' ? 'Principal' : 'Adicional'}
+                      <div className="mt-5 space-y-6">
+                        <div className="grid gap-3 sm:grid-cols-[190px_minmax(0,1fr)] sm:items-start">
+                          <div className="pt-2 text-sm font-semibold text-slate-700">Imagen principal</div>
+                          <div>
+                            <div className="grid gap-3 sm:grid-cols-[60px_minmax(0,1fr)]">
+                              {foto || fotografiaPrincipal ? (
+                                <img
+                                  src={foto?.vista ?? fotografiaPrincipal?.url}
+                                  alt={foto ? `Vista previa de ${foto.archivo.name}` : 'Imagen principal actual'}
+                                  className="h-[60px] w-[60px] rounded-lg border border-slate-200 object-cover"
+                                />
+                              ) : (
+                                <div className="hidden h-[60px] w-[60px] rounded-lg border border-dashed border-slate-200 bg-slate-50 sm:block" />
+                              )}
+                              <input
+                                ref={fotoInputRef}
+                                type="file"
+                                accept="image/jpeg,image/png,image/webp"
+                                className="sr-only"
+                                onChange={(event) => {
+                                  seleccionarFotografiaPrincipal(event.target.files?.[0])
+                                  event.currentTarget.value = ''
+                                }}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => fotoInputRef.current?.click()}
+                                onDragOver={(event) => event.preventDefault()}
+                                onDrop={(event) => {
+                                  event.preventDefault()
+                                  seleccionarFotografiaPrincipal(event.dataTransfer.files[0])
+                                }}
+                                className="flex min-h-28 w-full flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white px-5 py-5 text-center transition hover:border-orange-300 hover:bg-orange-50/40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500"
+                              >
+                                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-orange-100 text-orange-600">
+                                  <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" className="h-5 w-5">
+                                    <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 15.5v3A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5v-3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                                  </svg>
+                                </span>
+                                <span className="mt-2 text-sm font-semibold text-slate-800">
+                                  <span className="text-orange-700">Haz clic para cambiar</span> o arrastra y suelta
+                                </span>
+                                <span className="mt-1 text-xs text-slate-500">JPG, PNG o WebP · máximo 2 MB</span>
+                              </button>
+                            </div>
+                            {foto && (
+                              <>
+                                <div className="mt-2 flex items-center gap-3 rounded-lg border border-slate-200 p-3">
+                                  <span className="relative flex h-10 w-10 shrink-0 items-end justify-center rounded-md border border-slate-200 bg-white pb-1 text-[9px] font-bold text-orange-700">
+                                    {foto.archivo.name.split('.').pop()?.slice(0, 4).toUpperCase() ?? 'IMG'}
+                                    <span className="absolute -bottom-1 left-0 rounded bg-orange-500 px-1 text-[7px] text-white">ARCHIVO</span>
                                   </span>
-                                  {fotografia.tipo !== 'principal' && (
+                                  <span className="min-w-0 flex-1">
+                                    <span className="block truncate text-sm font-semibold text-slate-700">{foto.archivo.name}</span>
+                                    <span className="text-xs text-slate-500">{formatoPeso(foto.archivo.size)} · Lista para guardar</span>
+                                  </span>
+                                  <svg aria-label="Archivo listo" role="img" viewBox="0 0 24 24" fill="none" className="h-5 w-5 shrink-0 text-green-600">
+                                    <path d="m5 12 4 4L19 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                  </svg>
+                                  <button
+                                    type="button"
+                                    aria-label="Quitar fotografía principal"
+                                    onClick={() => {
+                                      if (foto) liberarVistaArchivo(foto)
+                                      setFoto(null)
+                                    }}
+                                    className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                                  >
+                                    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" className="h-4 w-4">
+                                      <path d="m7 7 10 10M17 7 7 17" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                                    </svg>
+                                  </button>
+                                </div>
+                                <div className="mt-2 flex items-center gap-2">
+                                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-orange-100" role="progressbar" aria-label="Archivo listo para guardar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={100}>
+                                    <div className="h-full w-full rounded-full bg-orange-500" />
+                                  </div>
+                                  <span className="text-xs font-medium text-slate-600">100%</span>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="grid gap-3 border-t border-slate-100 pt-5 sm:grid-cols-[190px_minmax(0,1fr)] sm:items-start">
+                          <div className="pt-2 text-sm font-semibold text-slate-700">Imágenes adicionales</div>
+                          <div>
+                            <div className="mb-3 flex flex-wrap gap-2">
+                              {editando && fotografias.filter((item) => item.tipo !== 'principal').map((fotografia) => (
+                                <div key={fotografia.id} className="w-16">
+                                  <a href={fotografia.url} target="_blank" rel="noreferrer">
+                                    <img
+                                      src={fotografia.url}
+                                      alt={fotografia.descripcion ?? `Fotografía de ${editando.codigo_institucional}`}
+                                      className="h-16 w-16 rounded-md border border-slate-200 object-cover"
+                                    />
+                                  </a>
+                                  <div className="mt-1 flex justify-center gap-2">
                                     <button
                                       type="button"
                                       disabled={gestionandoFoto}
+                                      aria-label="Usar como imagen principal"
+                                      title="Usar como imagen principal"
                                       onClick={() => void cambiarFotografiaPrincipal(editando.id, fotografia)}
                                       className="text-xs font-medium text-blue-700 hover:underline disabled:opacity-50"
                                     >
-                                      Hacer principal
+                                      Principal
                                     </button>
-                                  )}
-                                  <button
-                                    type="button"
-                                    disabled={gestionandoFoto}
-                                    onClick={() => void eliminarFoto(editando.id, fotografia)}
-                                    className="text-xs font-medium text-red-700 hover:underline disabled:opacity-50"
-                                  >
-                                    Eliminar
-                                  </button>
+                                    <button
+                                      type="button"
+                                      disabled={gestionandoFoto}
+                                      aria-label="Eliminar imagen adicional"
+                                      title="Eliminar imagen"
+                                      onClick={() => void eliminarFoto(editando.id, fotografia)}
+                                      className="text-xs font-medium text-red-700 hover:underline disabled:opacity-50"
+                                    >
+                                      Quitar
+                                    </button>
+                                  </div>
                                 </div>
-                              </div>
-                            ))}
-                          </div>
-                          <form onSubmit={(event) => void agregarFotoEditando(event)} className="mt-3 flex flex-wrap items-center gap-2">
+                              ))}
+                              {fotoAdicional.map((seleccion, indice) => (
+                                <div key={`${seleccion.archivo.name}-${seleccion.archivo.size}-${seleccion.archivo.lastModified}-${indice}`} className="w-16">
+                                  <div className="relative">
+                                    <img src={seleccion.vista} alt={`Vista previa de ${seleccion.archivo.name}`} className="h-16 w-16 rounded-md border border-orange-200 object-cover" />
+                                    <button
+                                      type="button"
+                                      aria-label={`Quitar ${seleccion.archivo.name}`}
+                                      onClick={() => {
+                                        liberarVistaArchivo(seleccion)
+                                        setFotoAdicional((actuales) => actuales.filter((_, posicion) => posicion !== indice))
+                                      }}
+                                      className="absolute -right-1 -top-1 rounded-full bg-white p-0.5 text-slate-600 shadow hover:text-red-600"
+                                    >
+                                      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" className="h-4 w-4">
+                                        <path d="m7 7 10 10M17 7 7 17" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                                      </svg>
+                                    </button>
+                                  </div>
+                                  <span className="mt-1 block truncate text-[10px] text-slate-500">{seleccion.archivo.name}</span>
+                                </div>
+                              ))}
+                            </div>
                             <input
+                              ref={fotoAdicionalInputRef}
                               type="file"
                               accept="image/jpeg,image/png,image/webp"
-                              onChange={(event) => setFotoAdicional(event.target.files?.[0] ?? null)}
-                              className="text-sm"
+                              multiple
+                              className="sr-only"
+                              onChange={(event) => {
+                                if (event.target.files) seleccionarFotografiasAdicionales(event.target.files)
+                                event.currentTarget.value = ''
+                              }}
                             />
-                            <button
-                              type="submit"
-                              disabled={!fotoAdicional || gestionandoFoto}
-                              className="rounded border border-slate-300 px-3 py-2 text-sm disabled:opacity-50"
+                            <div
+                              onDragOver={(event) => event.preventDefault()}
+                              onDrop={(event) => {
+                                event.preventDefault()
+                                seleccionarFotografiasAdicionales(event.dataTransfer.files)
+                              }}
+                              className="flex min-h-24 flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white px-4 py-4 text-center transition hover:border-orange-300 hover:bg-orange-50/40"
                             >
-                              {gestionandoFoto ? 'Subiendo...' : 'Agregar fotografía'}
-                            </button>
-                          </form>
-                        </>
-                      )}
+                              <span className="flex h-9 w-9 items-center justify-center rounded-full bg-orange-100 text-orange-600">
+                                <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" className="h-5 w-5">
+                                  <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 15.5v3A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5v-3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                                </svg>
+                              </span>
+                              <button type="button" onClick={() => fotoAdicionalInputRef.current?.click()} className="mt-2 text-sm font-semibold text-orange-700 hover:text-orange-800">
+                                Haz clic para añadir imágenes
+                              </button>
+                              <span className="mt-1 text-xs text-slate-500">o arrástralas aquí · Puedes seleccionar varias</span>
+                            </div>
+                            <div className="mt-3 flex justify-end">
+                              <button
+                                type="button"
+                                disabled={!fotoAdicional.length || gestionandoFoto || !editando}
+                                onClick={() => void agregarFotoEditando()}
+                                className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-orange-200 hover:bg-orange-50 disabled:opacity-50"
+                              >
+                                {gestionandoFoto ? 'Subiendo...' : editando ? `Subir imágenes${fotoAdicional.length ? ` (${fotoAdicional.length})` : ''}` : `${fotoAdicional.length} lista(s) para guardar`}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </details>
               </fieldset>
 
               {duplicados.length > 0 && (
@@ -1425,9 +1729,9 @@ export default function Equipos() {
                   </ul>
                 </div>
               )}
-              <div className="flex justify-end gap-2">
-                <button type="button" onClick={() => setModalAbierto(false)} className="rounded border border-slate-300 px-4 py-2">Cancelar</button>
-                <button type="submit" disabled={guardando || !categorias.length} className="rounded bg-blue-600 px-4 py-2 font-semibold text-white disabled:opacity-60">
+              <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+                <button type="button" onClick={() => setModalAbierto(false)} className="rounded-lg px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-100">Cancelar</button>
+                <button type="submit" disabled={guardando || !categorias.length} className="rounded-lg bg-orange-500 px-5 py-2 font-semibold text-white shadow-sm transition hover:bg-orange-600 disabled:opacity-60">
                   {guardando ? 'Guardando...' : editando ? 'Guardar cambios' : 'Registrar equipo'}
                 </button>
               </div>
@@ -1437,7 +1741,7 @@ export default function Equipos() {
       )}
 
       {equipoDetalle && (
-        <div className="fixed inset-0 z-30 overflow-y-auto bg-slate-950/50 p-3 sm:p-8">
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/50 p-3 sm:p-8">
           <section className="mx-auto max-w-4xl rounded-xl bg-white p-5 shadow-xl">
             <div className="flex items-start justify-between gap-4">
               <div>
@@ -1557,7 +1861,16 @@ export default function Equipos() {
                   ) : <p className="mt-1 text-sm text-slate-500">Sin fotografías.</p>}
                   {puedeEditar && equipoDetalle.situacion === 'activo' && (
                     <form onSubmit={(event) => void agregarFoto(event)} className="mt-2 flex flex-wrap items-center gap-2">
-                      <input type="file" required accept="image/jpeg,image/png,image/webp" onChange={(e) => setFoto(e.target.files?.[0] ?? null)} className="text-sm" />
+                      <input
+                        type="file"
+                        required
+                        accept="image/jpeg,image/png,image/webp"
+                        onChange={(e) => {
+                          seleccionarFotografiaPrincipal(e.target.files?.[0])
+                          e.currentTarget.value = ''
+                        }}
+                        className="text-sm"
+                      />
                       <button type="submit" disabled={!foto || gestionandoFoto} className="rounded border border-slate-300 px-3 py-2 text-sm disabled:opacity-50">
                         {gestionandoFoto ? 'Subiendo...' : 'Agregar fotografía'}
                       </button>

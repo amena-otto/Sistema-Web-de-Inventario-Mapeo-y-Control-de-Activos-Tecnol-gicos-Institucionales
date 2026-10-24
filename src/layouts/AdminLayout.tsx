@@ -28,6 +28,7 @@ const nombreRol: Record<Perfil['rol'], string> = {
 
 export default function AdminLayout() {
   const [abierto, setAbierto] = useState(false)
+  const [menuContraido, setMenuContraido] = useState(false)
   const [error, setError] = useState('')
   const { perfil, cerrarSesion } = useAuth()
   const { can } = usePermissions()
@@ -51,7 +52,7 @@ export default function AdminLayout() {
   }
 
   return (
-    <div className="min-h-screen bg-[#f2f5f9] text-slate-800">
+    <div className="min-h-screen bg-[#f7f5f2] text-slate-800">
       {abierto && (
         <button
           type="button"
@@ -61,35 +62,40 @@ export default function AdminLayout() {
         />
       )}
       <aside
-        className={`fixed inset-y-0 left-0 z-40 flex w-[270px] flex-col bg-[#102b4e] text-white shadow-xl transition-transform duration-200 md:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-40 flex flex-col bg-[#33251d] text-white shadow-xl transition-all duration-200 md:translate-x-0 ${
+          menuContraido ? 'w-[270px] md:w-20' : 'w-[270px]'
+        } ${
           abierto ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
-        <div className="border-b border-white/10 px-6 py-6">
-          <div className="flex items-center gap-3">
+        <div className={`border-b border-white/10 px-6 py-6 ${menuContraido ? 'md:px-4' : ''}`}>
+          <div className={`flex items-center gap-3 ${menuContraido ? 'md:justify-center' : ''}`}>
             <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-amber-300/60 bg-white/10 text-lg font-black text-amber-200">
               OT
             </div>
-            <div>
+            <div className={menuContraido ? 'md:hidden' : ''}>
               <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-amber-200">Instituto</p>
               <h1 className="mt-1 text-sm font-bold leading-tight">Otto Tonsmann</h1>
             </div>
           </div>
-          <p className="mt-5 text-xs leading-relaxed text-blue-100/70">
+          <p className={`mt-5 text-xs leading-relaxed text-blue-100/70 ${menuContraido ? 'md:hidden' : ''}`}>
             Gestión institucional de activos tecnológicos
           </p>
         </div>
 
         <nav aria-label="Navegación principal" className="flex-1 space-y-1 px-3 py-5">
-          <p className="mb-3 px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-blue-200/60">Menú principal</p>
+          <p className={`mb-3 px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-blue-200/60 ${menuContraido ? 'md:hidden' : ''}`}>Menú principal</p>
           {menuVisible.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
               end={item.to === '/'}
               onClick={() => setAbierto(false)}
+              title={menuContraido ? item.label : undefined}
               className={({ isActive }) =>
-                `group flex items-center gap-3 rounded-lg border-l-[3px] px-3 py-3 text-sm transition ${
+                `group flex items-center gap-3 rounded-lg border-l-[3px] py-3 text-sm transition ${
+                  menuContraido ? 'px-3 md:justify-center md:px-2' : 'px-3'
+                } ${
                   isActive
                     ? 'border-amber-300 bg-white/10 font-semibold text-white'
                     : 'border-transparent text-blue-100/75 hover:bg-white/[0.07] hover:text-white'
@@ -99,21 +105,21 @@ export default function AdminLayout() {
               <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" className="h-[19px] w-[19px] shrink-0" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
                 <path d={item.icono} />
               </svg>
-              <span>{item.label}</span>
+              <span className={menuContraido ? 'md:hidden' : ''}>{item.label}</span>
             </NavLink>
           ))}
         </nav>
 
-        <div className="m-4 rounded-xl border border-white/10 bg-white/[0.06] p-4">
+        <div className={`m-4 rounded-xl border border-white/10 bg-white/[0.06] p-4 ${menuContraido ? 'md:hidden' : ''}`}>
           <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-amber-200">Control institucional</p>
           <p className="mt-2 text-xs leading-relaxed text-blue-100/70">Información organizada para una gestión responsable de los recursos.</p>
         </div>
-        <div className="border-t border-white/10 px-6 py-4 text-[10px] text-blue-100/50">
+        <div className={`border-t border-white/10 px-6 py-4 text-[10px] text-blue-100/50 ${menuContraido ? 'md:hidden' : ''}`}>
           SISTEMA DE INVENTARIO · OT
         </div>
       </aside>
 
-      <div className="min-h-screen md:pl-[270px]">
+      <div className={`min-h-screen transition-[padding] duration-200 ${menuContraido ? 'md:pl-20' : 'md:pl-[270px]'}`}>
         <header className="sticky top-0 z-20 border-b border-slate-200/80 bg-white/95 backdrop-blur">
           <div className="flex min-h-[76px] items-center justify-between gap-4 px-4 sm:px-6 lg:px-9">
             <div className="flex min-w-0 items-center gap-3">
@@ -127,9 +133,20 @@ export default function AdminLayout() {
                   <path d="M4 6h16M4 12h16M4 18h16" />
                 </svg>
               </button>
+              <button
+                type="button"
+                aria-label={menuContraido ? 'Expandir menú' : 'Contraer menú'}
+                aria-expanded={!menuContraido}
+                className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-700 transition hover:bg-slate-50 md:flex"
+                onClick={() => setMenuContraido((actual) => !actual)}
+              >
+                <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" className="h-5 w-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d={menuContraido ? 'M9 5l7 7-7 7' : 'M15 5l-7 7 7 7'} />
+                </svg>
+              </button>
               <div className="min-w-0">
-                <p className="truncate text-[10px] font-bold uppercase tracking-[0.18em] text-[#a87918]">IES Privado Otto Tonsmann</p>
-                <h2 className="mt-0.5 truncate text-lg font-bold text-[#17395e]">{seccionActual}</h2>
+                <p className="truncate text-[10px] font-bold uppercase tracking-[0.18em] text-orange-700">IES Privado Otto Tonsmann</p>
+                <h2 className="mt-0.5 truncate text-lg font-bold text-[#33251d]">{seccionActual}</h2>
               </div>
             </div>
 
@@ -140,7 +157,7 @@ export default function AdminLayout() {
                 </p>
                 <p className="text-xs text-slate-500">{perfil ? nombreRol[perfil.rol] : ''}</p>
               </div>
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#e7eef7] text-sm font-bold text-[#17395e] ring-2 ring-white">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-orange-100 text-sm font-bold text-orange-800 ring-2 ring-white">
                 {iniciales}
               </div>
               <button
