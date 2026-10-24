@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import EquipoQrDialog from '../components/EquipoQrDialog'
+import { listarHistorialMovimientos, type Movimiento } from '../services/movimientosService'
+import { listarMantenimientos, type Mantenimiento } from '../services/mantenimientosService'
 import { usePermissions } from '../hooks/usePermissions'
 import {
   actualizarEquipo,
@@ -16,8 +19,9 @@ import {
   listarOpcionesRelacion,
   listarEquipos,
   listarEquiposParaExportar,
-  obtenerDetalleEquipo,
+  obtenerDatosDetalleEquipo,
   obtenerEquipo,
+  obtenerFotografiasEquipo,
   posiblesDuplicados,
   reactivarEquipo,
   subirFotografia,
@@ -28,8 +32,10 @@ import {
   type Equipo,
   type EstadoOperativo,
   type Fotografia,
+  type FotografiaConUrl,
   type RelacionEquipo,
   type Responsable,
+  type UbicacionEquipo,
 } from '../services/equiposService'
 
 const porPagina = 12
@@ -220,12 +226,13 @@ function fechaCsvAISO(valor: string) {
 
 export default function Equipos() {
   const { can } = usePermissions()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const puedeCrear = can('equipos.crear')
   const puedeEditar = can('equipos.editar')
   const puedeDarDeBaja = can('equipos.baja')
   const puedeAdministrarCategorias = can('categorias.administrar')
   const puedeVerMantenimientos = can('mantenimientos.ver')
+  const puedeVerMovimientos = can('movimientos.ver')
   const [categorias, setCategorias] = useState<Categoria[]>([])
   const [ambientes, setAmbientes] = useState<Ambiente[]>([])
   const [responsables, setResponsables] = useState<Responsable[]>([])
@@ -249,28 +256,57 @@ export default function Equipos() {
   const [guardando, setGuardando] = useState(false)
   const [guardandoCategoria, setGuardandoCategoria] = useState(false)
   const [editando, setEditando] = useState<Equipo | null>(null)
+  const [cargandoDatosEdicion, setCargandoDatosEdicion] = useState(false)
+  const [errorDatosEdicion, setErrorDatosEdicion] = useState('')
   const [datos, setDatos] = useState<DatosEquipo>(vacio)
   const [tecnicas, setTecnicas] = useState<Record<string, string>>({})
   const [duplicados, setDuplicados] = useState<Equipo[]>([])
   const [equipoDetalle, setEquipoDetalle] = useState<Equipo | null>(null)
+  const [equipoQr, setEquipoQr] = useState<Equipo | null>(null)
   const [detalleCargando, setDetalleCargando] = useState(false)
   const [componentes, setComponentes] = useState<Componente[]>([])
   const [relaciones, setRelaciones] = useState<RelacionEquipo[]>([])
-  const [fotografias, setFotografias] = useState<(Fotografia & { url: string })[]>([])
+  const [historialMantenimientos, setHistorialMantenimientos] = useState<Mantenimiento[]>([])
+  const [historialMovimientos, setHistorialMovimientos] = useState<Movimiento[]>([])
+  const [fotografias, setFotografias] = useState<FotografiaConUrl[]>([])
+  const [fotografiasCargando, setFotografiasCargando] = useState(false)
+  const [errorFotografias, setErrorFotografias] = useState('')
+  const [ubicacionDetalle, setUbicacionDetalle] = useState<UbicacionEquipo | null>(null)
   const [fechaUltimoMantenimiento, setFechaUltimoMantenimiento] = useState<string | null>(null)
   const [opcionesRelacion, setOpcionesRelacion] = useState<{ id: string; codigo_institucional: string; nombre: string }[]>([])
+  const [opcionesRelacionCargando, setOpcionesRelacionCargando] = useState(false)
+  const [errorOpcionesRelacion, setErrorOpcionesRelacion] = useState('')
   const [componenteTipo, setComponenteTipo] = useState('')
   const [componenteDetalle, setComponenteDetalle] = useState('')
   const [equipoRelacionado, setEquipoRelacionado] = useState('')
   const [foto, setFoto] = useState<ArchivoConVista | null>(null)
   const [fotoAdicional, setFotoAdicional] = useState<ArchivoConVista[]>([])
   const [gestionandoFoto, setGestionandoFoto] = useState(false)
+  const solicitudDetalle = useRef(0)
+  const solicitudFotografias = useRef(0)
+  const solicitudEdicion = useRef(0)
+  const componenteMontado = useRef(false)
+  const equipoDetalleIdActual = useRef<string | null>(null)
+  const equipoEdicionIdActual = useRef<string | null>(null)
   const fotoInputRef = useRef<HTMLInputElement>(null)
   const fotoAdicionalInputRef = useRef<HTMLInputElement>(null)
+  const fotoAdicionalSeccionRef = useRef<HTMLDivElement>(null)
+  const fotoAdicionalSelectorRef = useRef<HTMLButtonElement>(null)
+  const enfocarSeccionFotosAdicionales = useRef(false)
   const vistasPendientes = useRef(new Set<string>())
   const [importando, setImportando] = useState(false)
   const [exportando, setExportando] = useState(false)
   const [resultadoImportacion, setResultadoImportacion] = useState<string[]>([])
+
+  useEffect(() => {
+    componenteMontado.current = true
+    return () => {
+      componenteMontado.current = false
+      solicitudDetalle.current += 1
+      solicitudFotografias.current += 1
+      solicitudEdicion.current += 1
+    }
+  }, [])
 
   useEffect(
     () => () => {
@@ -302,6 +338,19 @@ export default function Equipos() {
       window.removeEventListener('keydown', cerrarConEscape)
     }
   }, [modalAbierto, guardando])
+
+  useEffect(() => {
+    if (!modalAbierto) solicitudEdicion.current += 1
+  }, [modalAbierto])
+
+  useEffect(() => {
+    if (!modalAbierto || !editando || !enfocarSeccionFotosAdicionales.current) return
+    enfocarSeccionFotosAdicionales.current = false
+    requestAnimationFrame(() => {
+      fotoAdicionalSeccionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      fotoAdicionalSelectorRef.current?.focus({ preventScroll: true })
+    })
+  }, [editando, modalAbierto])
 
   useEffect(() => {
     let vigente = true
@@ -369,6 +418,19 @@ export default function Equipos() {
     [responsables],
   )
   const fotografiaPrincipal = fotografias.find((fotografia) => fotografia.tipo === 'principal')
+  const cerrarQr = useCallback(() => setEquipoQr(null), [])
+  const cerrarDetalle = useCallback(() => {
+    solicitudDetalle.current += 1
+    solicitudFotografias.current += 1
+    equipoDetalleIdActual.current = null
+    setEquipoDetalle(null)
+    setFotografiasCargando(false)
+    if (searchParams.has('equipo')) {
+      const parametros = new URLSearchParams(searchParams)
+      parametros.delete('equipo')
+      setSearchParams(parametros, { replace: true })
+    }
+  }, [searchParams, setSearchParams])
 
   function crearVistaArchivo(archivo: File): ArchivoConVista {
     const vista = URL.createObjectURL(archivo)
@@ -391,7 +453,7 @@ export default function Equipos() {
   function seleccionarFotografiaPrincipal(archivo: File | undefined) {
     if (!archivo) return
     if (!tiposFotografia.has(archivo.type)) {
-      setError('Selecciona una imagen JPEG, PNG o WebP para la fotografía principal.')
+      setError('Selecciona una imagen JPEG, PNG o WebP.')
       return
     }
     setError('')
@@ -424,8 +486,12 @@ export default function Equipos() {
   }
 
   function iniciarNuevo() {
+    solicitudEdicion.current += 1
+    equipoEdicionIdActual.current = null
     limpiarFotografiasPendientes()
     setEditando(null)
+    setCargandoDatosEdicion(false)
+    setErrorDatosEdicion('')
     setDatos({ ...vacio, categoria_id: categorias[0]?.id ?? '' })
     setTecnicas({})
     setDuplicados([])
@@ -433,9 +499,19 @@ export default function Equipos() {
     setModalAbierto(true)
   }
 
-  async function iniciarEdicion(equipo: Equipo) {
+  function iniciarEdicion(equipo: Equipo) {
+    const solicitudActual = ++solicitudEdicion.current
+    equipoEdicionIdActual.current = equipo.id
     limpiarFotografiasPendientes()
     setEditando(equipo)
+    setCargandoDatosEdicion(true)
+    setErrorDatosEdicion('')
+    setFotografias([])
+    setFotografiasCargando(true)
+    setErrorFotografias('')
+    setError('')
+    setAviso('')
+    setDuplicados([])
     setDatos({
       categoria_id: equipo.categoria_id,
       ambiente_id: equipo.ambiente_id,
@@ -452,25 +528,55 @@ export default function Equipos() {
       observaciones: equipo.observaciones ?? '',
     })
     setTecnicas({})
-    try {
-      const detalle = await obtenerDetalleEquipo(equipo.id, false)
-      setFotografias(detalle.fotografias)
-      setTecnicas(
-        Object.fromEntries(
-          detalle.componentes
-            .filter((componente) =>
-              etiquetasTecnicas.some(([tipo]) => tipo === componente.tipo),
-            )
-            .map((componente) => [componente.tipo, componente.capacidad ?? '']),
-        ),
-      )
-    } catch (e) {
-      setError(mostrarError(e, 'No se pudieron cargar las características técnicas.'))
-      return
-    }
-    setDuplicados([])
-    setError('')
     setModalAbierto(true)
+
+    void obtenerDatosDetalleEquipo(equipo.id, equipo.ambiente_id)
+      .then((detalle) => {
+        if (!componenteMontado.current || solicitudActual !== solicitudEdicion.current) return
+        setTecnicas(
+          Object.fromEntries(
+            detalle.componentes
+              .filter((componente) =>
+                etiquetasTecnicas.some(([tipo]) => tipo === componente.tipo),
+              )
+              .map((componente) => [componente.tipo, componente.capacidad ?? '']),
+          ),
+        )
+      })
+      .catch((e: unknown) => {
+        if (componenteMontado.current && solicitudActual === solicitudEdicion.current) {
+          const mensaje = mostrarError(e, 'No se pudieron cargar las características técnicas.')
+          setErrorDatosEdicion(mensaje)
+          setError(mensaje)
+        }
+      })
+      .finally(() => {
+        if (componenteMontado.current && solicitudActual === solicitudEdicion.current) {
+          setCargandoDatosEdicion(false)
+        }
+      })
+
+    void obtenerFotografiasEquipo(equipo.id)
+      .then((resultado) => {
+        if (!componenteMontado.current || solicitudActual !== solicitudEdicion.current) {
+          resultado.forEach((fotografia) => {
+            if (fotografia.url.startsWith('blob:')) URL.revokeObjectURL(fotografia.url)
+          })
+          return
+        }
+        setFotografias(resultado)
+        setErrorFotografias('')
+      })
+      .catch((e: unknown) => {
+        if (componenteMontado.current && solicitudActual === solicitudEdicion.current) {
+          setErrorFotografias(mostrarError(e, 'No se pudieron cargar las fotografías.'))
+        }
+      })
+      .finally(() => {
+        if (componenteMontado.current && solicitudActual === solicitudEdicion.current) {
+          setFotografiasCargando(false)
+        }
+      })
   }
 
   function cambiarDato<K extends keyof DatosEquipo>(campo: K, valor: DatosEquipo[K]) {
@@ -501,6 +607,7 @@ export default function Equipos() {
 
   async function guardarEquipo(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (cargandoDatosEdicion || errorDatosEdicion) return
     setError('')
     setAviso('')
     setGuardando(true)
@@ -620,29 +727,139 @@ export default function Equipos() {
     }
   }
 
+  const refrescarFotografias = useCallback(async (equipoId: string, detalleSolicitud?: number) => {
+    const solicitudActual = ++solicitudFotografias.current
+    if (
+      detalleSolicitud !== undefined ||
+      equipoDetalleIdActual.current === equipoId ||
+      equipoEdicionIdActual.current === equipoId
+    ) {
+      setFotografiasCargando(true)
+      setErrorFotografias('')
+    }
+    try {
+      const resultado = await obtenerFotografiasEquipo(equipoId)
+      const puedeActualizar =
+        componenteMontado.current &&
+        solicitudActual === solicitudFotografias.current &&
+        (detalleSolicitud === undefined || detalleSolicitud === solicitudDetalle.current)
+      if (puedeActualizar) {
+        setFotografias(resultado)
+        setErrorFotografias('')
+      } else {
+        resultado.forEach((fotografia) => {
+          if (fotografia.url.startsWith('blob:')) URL.revokeObjectURL(fotografia.url)
+        })
+      }
+    } catch (e) {
+      if (
+        componenteMontado.current &&
+        solicitudActual === solicitudFotografias.current &&
+        (detalleSolicitud === undefined || detalleSolicitud === solicitudDetalle.current)
+      ) {
+        setErrorFotografias(mostrarError(e, 'No se pudieron cargar las fotografías.'))
+      }
+      throw e
+    } finally {
+      if (
+        componenteMontado.current &&
+        solicitudActual === solicitudFotografias.current &&
+        (detalleSolicitud === undefined || detalleSolicitud === solicitudDetalle.current)
+      ) {
+        setFotografiasCargando(false)
+      }
+    }
+  }, [])
+
   const abrirDetalle = useCallback(async (equipo: Equipo) => {
+    const solicitudActual = ++solicitudDetalle.current
+    equipoDetalleIdActual.current = equipo.id
     setEquipoDetalle(equipo)
     setDetalleCargando(true)
     setError('')
+    setAviso('')
+    setComponentes([])
+    setRelaciones([])
+    setFotografias([])
+    setFotografiasCargando(false)
+    setErrorFotografias('')
+    setUbicacionDetalle(null)
+    setHistorialMantenimientos([])
+    setHistorialMovimientos([])
+    setOpcionesRelacion([])
+    setErrorOpcionesRelacion('')
+
+    void refrescarFotografias(equipo.id, solicitudActual).catch(() => undefined)
+
+    const necesitaOpcionesRelacion = puedeEditar && equipo.situacion === 'activo'
+    if (necesitaOpcionesRelacion) {
+      setOpcionesRelacionCargando(true)
+      void listarOpcionesRelacion(equipo.id)
+        .then((opciones) => {
+          if (!componenteMontado.current || solicitudActual !== solicitudDetalle.current) return
+          setOpcionesRelacion(opciones)
+        })
+        .catch((e: unknown) => {
+          if (!componenteMontado.current || solicitudActual !== solicitudDetalle.current) return
+          setErrorOpcionesRelacion(mostrarError(e, 'No se pudieron cargar los equipos relacionados.'))
+        })
+        .finally(() => {
+          if (componenteMontado.current && solicitudActual === solicitudDetalle.current) {
+            setOpcionesRelacionCargando(false)
+          }
+        })
+    } else {
+      setOpcionesRelacionCargando(false)
+    }
+
     try {
-      const detalle = await obtenerDetalleEquipo(equipo.id, puedeVerMantenimientos)
+      const [detalle, mantenimientos, movimientos] = await Promise.all([
+        obtenerDatosDetalleEquipo(equipo.id, equipo.ambiente_id),
+        puedeVerMantenimientos
+          ? listarMantenimientos({
+              equipoId: equipo.id,
+              responsableId: '',
+              estado: '',
+              desde: '',
+              hasta: '',
+              revisionVencida: false,
+              ordenReciente: true,
+              pagina: 1,
+              porPagina: 5,
+            })
+          : Promise.resolve({ mantenimientos: [], total: 0 }),
+        puedeVerMovimientos
+          ? listarHistorialMovimientos({
+              equipoId: equipo.id,
+              desde: '',
+              hasta: '',
+              pagina: 1,
+              porPagina: 5,
+            })
+          : Promise.resolve({ movimientos: [], total: 0 }),
+      ])
+      if (!componenteMontado.current || solicitudActual !== solicitudDetalle.current) return
       setComponentes(detalle.componentes)
       setRelaciones(detalle.relaciones)
-      setFotografias(detalle.fotografias)
-      setFechaUltimoMantenimiento(detalle.fechaUltimoMantenimiento)
-      const opciones = await listarOpcionesRelacion(equipo.id)
-      setOpcionesRelacion(opciones)
+      setUbicacionDetalle(detalle.ubicacion)
+      setFechaUltimoMantenimiento(mantenimientos.mantenimientos[0]?.created_at ?? null)
+      setHistorialMantenimientos(mantenimientos.mantenimientos)
+      setHistorialMovimientos(movimientos.movimientos)
     } catch (e) {
+      if (!componenteMontado.current || solicitudActual !== solicitudDetalle.current) return
       setError(mostrarError(e, 'No se pudo cargar el detalle del equipo.'))
       setComponentes([])
       setRelaciones([])
-      setFotografias([])
+      setUbicacionDetalle(null)
       setFechaUltimoMantenimiento(null)
-      setOpcionesRelacion([])
+      setHistorialMantenimientos([])
+      setHistorialMovimientos([])
     } finally {
-      setDetalleCargando(false)
+      if (componenteMontado.current && solicitudActual === solicitudDetalle.current) {
+        setDetalleCargando(false)
+      }
     }
-  }, [puedeVerMantenimientos])
+  }, [puedeEditar, puedeVerMantenimientos, puedeVerMovimientos, refrescarFotografias])
 
   useEffect(() => {
     const equipoId = searchParams.get('equipo')
@@ -650,10 +867,12 @@ export default function Equipos() {
     let vigente = true
     obtenerEquipo(equipoId)
       .then((equipo) => {
-        if (vigente) void abrirDetalle(equipo)
+        if (vigente && componenteMontado.current) void abrirDetalle(equipo)
       })
       .catch((e: unknown) => {
-        if (vigente) setError(mostrarError(e, 'No se pudo abrir la ficha del equipo.'))
+        if (vigente && componenteMontado.current) {
+          setError(mostrarError(e, 'No se pudo abrir la ficha del equipo.'))
+        }
       })
     return () => {
       vigente = false
@@ -694,27 +913,12 @@ export default function Equipos() {
     }
   }
 
-  async function agregarFoto(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!equipoDetalle || !foto) return
-    setError('')
-    setAviso('')
-    setGestionandoFoto(true)
-    try {
-      await subirFotografia(equipoDetalle.id, foto.archivo, 'adicional')
-      liberarVistaArchivo(foto)
-      setFoto(null)
-      setAviso('Fotografía adicional agregada correctamente.')
-      try {
-        await refrescarFotografias(equipoDetalle.id)
-      } catch (e) {
-        setError(`La fotografía se agregó, pero no se pudo actualizar la vista: ${mostrarError(e, 'error desconocido')}`)
-      }
-    } catch (e) {
-      setError(mostrarError(e, 'No se pudo subir la fotografía.'))
-    } finally {
-      setGestionandoFoto(false)
-    }
+  async function irAEditarParaAgregarFoto() {
+    if (!equipoDetalle) return
+    const equipo = equipoDetalle
+    cerrarDetalle()
+    enfocarSeccionFotosAdicionales.current = true
+    await iniciarEdicion(equipo)
   }
 
   async function agregarFotoEditando() {
@@ -749,11 +953,6 @@ export default function Equipos() {
     } finally {
       setGestionandoFoto(false)
     }
-  }
-
-  async function refrescarFotografias(equipoId: string) {
-    const detalle = await obtenerDetalleEquipo(equipoId, false)
-    setFotografias(detalle.fotografias)
   }
 
   async function cambiarFotografiaPrincipal(equipoId: string, fotografia: Fotografia) {
@@ -811,7 +1010,7 @@ export default function Equipos() {
     try {
       await darDeBajaEquipo(equipo.id)
       setAviso(`${equipo.codigo_institucional} fue dado de baja.`)
-      setEquipoDetalle(null)
+      cerrarDetalle()
       setPagina(1)
       setActualizacion((actual) => actual + 1)
     } catch (e) {
@@ -1045,15 +1244,15 @@ export default function Equipos() {
   }
 
   return (
-    <section className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
+    <section className="flex min-w-0 flex-col gap-4">
+      <div className="flex flex-col items-stretch justify-between gap-4 sm:flex-row sm:items-start">
+        <div className="min-w-0">
           <h2 className="text-2xl font-semibold">Inventario tecnológico</h2>
           <p className="mt-1 text-sm text-slate-600">
             Registra, consulta y controla los activos tecnológicos institucionales.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="grid grid-cols-1 gap-2 min-[420px]:grid-cols-2 sm:flex sm:shrink-0">
           {puedeAdministrarCategorias && (
             <button
               type="button"
@@ -1175,7 +1374,7 @@ export default function Equipos() {
         </details>
       )}
 
-      <div className="mt-5 grid gap-3 rounded-xl bg-white p-4 shadow sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mt-5 grid min-w-0 gap-3 rounded-xl bg-white p-3 shadow sm:grid-cols-2 sm:p-4 lg:grid-cols-4">
         <input
           type="search"
           value={busqueda}
@@ -1185,7 +1384,7 @@ export default function Equipos() {
           }}
           placeholder="Código, serie, marca o equipo"
           aria-label="Buscar en inventario"
-          className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          className="min-w-0 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"
         />
         <select
           value={categoriaFiltro}
@@ -1194,7 +1393,7 @@ export default function Equipos() {
             setPagina(1)
           }}
           aria-label="Filtrar por categoría"
-          className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          className="min-w-0 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"
         >
           <option value="">Todas las categorías</option>
           {categorias.map((categoria) => (
@@ -1210,7 +1409,7 @@ export default function Equipos() {
             setPagina(1)
           }}
           aria-label="Filtrar por ubicación"
-          className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          className="min-w-0 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"
         >
           <option value="">Todas las ubicaciones</option>
           {ambientes.map((ambiente) => (
@@ -1226,7 +1425,7 @@ export default function Equipos() {
             setPagina(1)
           }}
           aria-label="Filtrar por estado"
-          className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          className="min-w-0 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"
         >
           <option value="">Todos los estados</option>
           {estadosOperativos.map((opcion) => (
@@ -1258,9 +1457,9 @@ export default function Equipos() {
         </div>
       )}
 
-      <div className="mt-4 overflow-x-auto rounded-xl bg-white shadow">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
-          <h2 className="font-semibold text-slate-800">
+      <div className="mt-4 min-w-0 overflow-hidden rounded-xl bg-white shadow">
+        <div className="flex flex-col items-stretch justify-between gap-3 border-b border-slate-100 px-3 py-3 sm:flex-row sm:items-center sm:px-4">
+          <h2 className="min-w-0 font-semibold text-slate-800">
             {verHistorialCompleto ? 'Historial completo de equipos' : 'Últimos equipos registrados'}
           </h2>
           <button
@@ -1269,11 +1468,69 @@ export default function Equipos() {
               setPagina(1)
               setVerHistorialCompleto((actual) => !actual)
             }}
-            className="rounded-lg border border-blue-200 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50"
+            className="w-full rounded-lg border border-blue-200 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 sm:w-auto"
           >
             {verHistorialCompleto ? 'Ver últimos registros' : 'Ver historial completo'}
           </button>
         </div>
+        <div className="divide-y divide-slate-100 md:hidden">
+          {cargando && <p role="status" className="px-4 py-8 text-center text-sm text-slate-500">Cargando inventario...</p>}
+          {!cargando && equipos.length === 0 && <p className="px-4 py-8 text-center text-sm text-slate-500">No hay equipos para mostrar.</p>}
+          {!cargando && equipos.map((equipo) => {
+            const ambiente = equipo.ambiente_id ? ambientesPorId.get(equipo.ambiente_id) : null
+            const deBaja = equipo.situacion !== 'activo'
+            return (
+              <article key={equipo.id} className="min-w-0 space-y-3 p-4">
+                <div className="flex min-w-0 items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="break-words text-sm font-bold text-orange-800">{equipo.codigo_institucional}</p>
+                    <h3 className="mt-0.5 break-words font-semibold text-slate-900">{equipo.nombre}</h3>
+                    <p className="mt-0.5 break-words text-xs text-slate-500">{equipo.modelo ?? 'Sin modelo'}</p>
+                  </div>
+                  <span className={`max-w-[45%] shrink-0 rounded-full px-2.5 py-1 text-center text-[11px] font-semibold leading-tight ${deBaja ? 'bg-slate-100 text-slate-700' : 'bg-emerald-50 text-emerald-800'}`}>
+                    {equipo.situacion === 'baja'
+                      ? 'Dado de baja'
+                      : equipo.situacion === 'archivado'
+                        ? 'Archivado'
+                        : etiquetasEstado[equipo.estado_operativo]}
+                  </span>
+                </div>
+                <dl className="grid min-w-0 grid-cols-2 gap-x-3 gap-y-2 rounded-lg bg-slate-50 p-3 text-xs">
+                  <div className="min-w-0">
+                    <dt className="text-slate-500">Categoría</dt>
+                    <dd className="mt-0.5 break-words font-medium text-slate-800">{categoriasPorId.get(equipo.categoria_id) ?? '—'}</dd>
+                  </div>
+                  <div className="min-w-0">
+                    <dt className="text-slate-500">Serie / marca</dt>
+                    <dd className="mt-0.5 break-words font-medium text-slate-800">{equipo.numero_serie ?? 'Sin serie'} / {equipo.marca ?? 'Sin marca'}</dd>
+                  </div>
+                  <div className="col-span-2 min-w-0">
+                    <dt className="text-slate-500">Ubicación</dt>
+                    <dd className="mt-0.5 break-words font-medium text-slate-800">
+                      {ambiente
+                        ? `${ambiente.pabellon} / ${ambiente.piso} / ${ambiente.codigo}${equipo.posicion ? ` · ${equipo.posicion}` : ''}`
+                        : 'Sin ubicación'}
+                    </dd>
+                  </div>
+                </dl>
+                <div className="grid grid-cols-2 gap-2 min-[420px]:grid-cols-3">
+                  <button type="button" onClick={() => setEquipoQr(equipo)} className="min-h-10 rounded-lg border border-orange-200 px-3 py-2 text-sm font-semibold text-orange-700 hover:bg-orange-50">QR</button>
+                  <button type="button" onClick={() => void abrirDetalle(equipo)} className="min-h-10 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Detalle</button>
+                  {puedeEditar && !deBaja && (
+                    <button type="button" onClick={() => void iniciarEdicion(equipo)} className="min-h-10 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Editar</button>
+                  )}
+                  {puedeDarDeBaja && !deBaja && (
+                    <button type="button" onClick={() => void confirmarBaja(equipo)} className="min-h-10 rounded-lg border border-red-200 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-50">Dar de baja</button>
+                  )}
+                  {puedeDarDeBaja && deBaja && (
+                    <button type="button" onClick={() => void reactivar(equipo)} className="min-h-10 rounded-lg border border-green-200 px-3 py-2 text-sm font-semibold text-green-700 hover:bg-green-50">Reactivar</button>
+                  )}
+                </div>
+              </article>
+            )
+          })}
+        </div>
+        <div className="hidden overflow-x-auto md:block">
         <table className="w-full min-w-[900px] text-left text-sm">
           <thead className="border-b bg-slate-50 text-slate-600">
             <tr>
@@ -1324,6 +1581,7 @@ export default function Equipos() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={() => setEquipoQr(equipo)} className="rounded border border-orange-200 px-3 py-1 font-semibold text-orange-700 hover:bg-orange-50">QR</button>
                       <button type="button" onClick={() => void abrirDetalle(equipo)} className="rounded border border-slate-300 px-3 py-1 hover:bg-slate-50">Detalle</button>
                       {puedeEditar && !deBaja && (
                         <button type="button" onClick={() => void iniciarEdicion(equipo)} className="rounded border border-slate-300 px-3 py-1 hover:bg-slate-50">Editar</button>
@@ -1341,17 +1599,18 @@ export default function Equipos() {
             })}
           </tbody>
         </table>
+        </div>
       </div>
-      <div className="mt-3 flex items-center justify-between text-sm text-slate-600">
+      <div className="mt-3 flex flex-col items-start justify-between gap-3 text-sm text-slate-600 sm:flex-row sm:items-center">
         <span>
           {verHistorialCompleto ? total : Math.min(total, registrosRecientes)} de {total} equipos
           {verHistorialCompleto ? ` · página ${pagina} de ${paginas}` : ' · más recientes'}
         </span>
-        <div className="flex gap-2">
+        <div className="flex w-full gap-2 sm:w-auto sm:justify-end">
           {verHistorialCompleto && (
             <>
-              <button type="button" disabled={pagina <= 1 || cargando} onClick={() => setPagina((actual) => actual - 1)} className="rounded border border-slate-300 px-3 py-1 disabled:opacity-50">Anterior</button>
-              <button type="button" disabled={pagina >= paginas || cargando} onClick={() => setPagina((actual) => actual + 1)} className="rounded border border-slate-300 px-3 py-1 disabled:opacity-50">Siguiente</button>
+              <button type="button" disabled={pagina <= 1 || cargando} onClick={() => setPagina((actual) => actual - 1)} className="min-h-10 flex-1 rounded-lg border border-slate-300 px-3 py-2 disabled:opacity-50 sm:flex-none">Anterior</button>
+              <button type="button" disabled={pagina >= paginas || cargando} onClick={() => setPagina((actual) => actual + 1)} className="min-h-10 flex-1 rounded-lg border border-slate-300 px-3 py-2 disabled:opacity-50 sm:flex-none">Siguiente</button>
             </>
           )}
         </div>
@@ -1379,20 +1638,23 @@ export default function Equipos() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="formulario-equipo-titulo"
-            className="my-0 max-h-[calc(100dvh-1.5rem)] w-full max-w-5xl overflow-y-auto rounded-2xl border border-white/70 bg-white p-5 shadow-2xl sm:my-0 sm:max-h-[calc(100dvh-3rem)] sm:p-7 lg:p-8"
+            className="my-0 max-h-[calc(100dvh-1.5rem)] w-full max-w-5xl overflow-y-auto rounded-2xl border border-white/70 bg-white p-4 shadow-2xl sm:my-0 sm:max-h-[calc(100dvh-3rem)] sm:p-7 lg:p-8"
           >
-            <div className="flex items-center justify-between gap-3">
-              <div>
+            <div className="flex flex-col items-stretch justify-between gap-3 sm:flex-row sm:items-center">
+              <div className="min-w-0">
                 <h3 id="formulario-equipo-titulo" className="text-xl font-bold text-slate-900">{editando ? 'Editar equipo' : 'Crear equipo'}</h3>
                 <p className="text-sm text-slate-500">El código institucional se asigna automáticamente y no cambia al mover el activo.</p>
+                {cargandoDatosEdicion && (
+                  <p role="status" className="mt-1 text-xs text-slate-500">Cargando características del equipo…</p>
+                )}
               </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <button type="button" onClick={() => setModalAbierto(false)} className="rounded-lg px-3 py-2 text-sm font-medium text-slate-500 transition hover:bg-slate-100 hover:text-slate-800">Cancelar</button>
+              <div className="grid grid-cols-2 gap-2 sm:flex sm:shrink-0">
+                <button type="button" onClick={() => setModalAbierto(false)} className="min-h-10 rounded-lg px-3 py-2 text-sm font-medium text-slate-500 transition hover:bg-slate-100 hover:text-slate-800">Cancelar</button>
                 <button
                   type="submit"
                   form="formulario-equipo"
-                  disabled={guardando || !categorias.length}
-                  className="rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-600 disabled:opacity-60"
+                  disabled={guardando || cargandoDatosEdicion || Boolean(errorDatosEdicion) || !categorias.length}
+                  className="min-h-10 rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-600 disabled:opacity-60"
                 >
                   {guardando ? 'Guardando...' : editando ? 'Guardar cambios' : 'Guardar equipo'}
                 </button>
@@ -1401,6 +1663,11 @@ export default function Equipos() {
             {error && (
               <p role="alert" className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
                 {error}
+              </p>
+            )}
+            {errorDatosEdicion && (
+              <p role="alert" className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                No se puede guardar todavía porque no fue posible cargar las características técnicas. Cierra y vuelve a abrir la edición para intentarlo otra vez.
               </p>
             )}
             {aviso && (
@@ -1414,8 +1681,8 @@ export default function Equipos() {
               </p>
             )}
             <form id="formulario-equipo" onSubmit={(event) => void guardarEquipo(event)} className="mt-4 space-y-5">
-              <fieldset disabled={guardando || !categorias.length} className="space-y-5">
-                <div className="rounded-xl border border-slate-100 bg-white p-4 sm:p-5">
+              <fieldset disabled={guardando || !categorias.length} className="min-w-0 space-y-5">
+                <div className="min-w-0 rounded-xl border border-slate-100 bg-white p-3 sm:p-5">
                   <div className="border-b border-slate-100 pb-4">
                     <h4 className="font-bold text-slate-900">Datos principales</h4>
                     <p className="mt-1 text-sm text-slate-500">
@@ -1528,6 +1795,9 @@ export default function Equipos() {
                   </div>
                 </details>
 
+              </fieldset>
+
+              <fieldset disabled={guardando || (!categorias.length && !editando)} className="min-w-0">
                     <div className="rounded-xl border border-slate-100 bg-white p-4 sm:p-5">
                       <h4 className="font-bold text-slate-900">Fotografías del equipo</h4>
                       <p className="mt-1 text-sm text-slate-500">
@@ -1617,9 +1887,20 @@ export default function Equipos() {
                           </div>
                         </div>
 
-                        <div className="grid gap-3 border-t border-slate-100 pt-5 sm:grid-cols-[190px_minmax(0,1fr)] sm:items-start">
+                        <div ref={fotoAdicionalSeccionRef} className="grid gap-3 border-t border-slate-100 pt-5 sm:grid-cols-[190px_minmax(0,1fr)] sm:items-start">
                           <div className="pt-2 text-sm font-semibold text-slate-700">Imágenes adicionales</div>
                           <div>
+                            {fotografiasCargando && (
+                              <p role="status" className="mb-2 text-xs text-slate-500">Cargando imágenes existentes…</p>
+                            )}
+                            {errorFotografias && (
+                              <div role="alert" className="mb-2 flex flex-wrap items-center gap-2 rounded-lg bg-red-50 p-2 text-xs text-red-700">
+                                <span>{errorFotografias}</span>
+                                <button type="button" onClick={() => void refrescarFotografias(editando?.id ?? '').catch(() => undefined)} disabled={!editando} className="font-semibold underline disabled:hidden">
+                                  Reintentar
+                                </button>
+                              </div>
+                            )}
                             <div className="mb-3 flex flex-wrap gap-2">
                               {editando && fotografias.filter((item) => item.tipo !== 'principal').map((fotografia) => (
                                 <div key={fotografia.id} className="w-16">
@@ -1700,7 +1981,7 @@ export default function Equipos() {
                                   <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 15.5v3A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5v-3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
                                 </svg>
                               </span>
-                              <button type="button" onClick={() => fotoAdicionalInputRef.current?.click()} className="mt-2 text-sm font-semibold text-orange-700 hover:text-orange-800">
+                              <button ref={fotoAdicionalSelectorRef} type="button" onClick={() => fotoAdicionalInputRef.current?.click()} className="mt-2 text-sm font-semibold text-orange-700 hover:text-orange-800">
                                 Haz clic para añadir imágenes
                               </button>
                               <span className="mt-1 text-xs text-slate-500">o arrástralas aquí · Puedes seleccionar varias</span>
@@ -1729,9 +2010,9 @@ export default function Equipos() {
                   </ul>
                 </div>
               )}
-              <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-                <button type="button" onClick={() => setModalAbierto(false)} className="rounded-lg px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-100">Cancelar</button>
-                <button type="submit" disabled={guardando || !categorias.length} className="rounded-lg bg-orange-500 px-5 py-2 font-semibold text-white shadow-sm transition hover:bg-orange-600 disabled:opacity-60">
+              <div className="grid grid-cols-2 gap-2 border-t border-slate-100 pt-4 sm:flex sm:justify-end">
+                <button type="button" onClick={() => setModalAbierto(false)} className="min-h-10 rounded-lg px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-100">Cancelar</button>
+                <button type="submit" disabled={guardando || cargandoDatosEdicion || Boolean(errorDatosEdicion) || !categorias.length} className="min-h-10 rounded-lg bg-orange-500 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-600 disabled:opacity-60">
                   {guardando ? 'Guardando...' : editando ? 'Guardar cambios' : 'Registrar equipo'}
                 </button>
               </div>
@@ -1740,16 +2021,18 @@ export default function Equipos() {
         </div>
       )}
 
+      {equipoQr && <EquipoQrDialog key={equipoQr.id} equipo={equipoQr} onClose={cerrarQr} />}
+
       {equipoDetalle && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/50 p-3 sm:p-8">
-          <section className="mx-auto max-w-4xl rounded-xl bg-white p-5 shadow-xl">
-            <div className="flex items-start justify-between gap-4">
-              <div>
+          <section className="mx-auto max-w-4xl rounded-xl bg-white p-4 shadow-xl sm:p-6">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
                 <p className="text-sm font-semibold text-blue-700">{equipoDetalle.codigo_institucional}</p>
-                <h3 className="text-xl font-semibold">{equipoDetalle.nombre}</h3>
+                <h3 className="break-words text-xl font-semibold">{equipoDetalle.nombre}</h3>
                 <p className="text-sm text-slate-500">{categoriasPorId.get(equipoDetalle.categoria_id) ?? 'Categoría'} · {equipoDetalle.marca ?? 'Sin marca'} {equipoDetalle.modelo ?? ''}</p>
               </div>
-              <button type="button" onClick={() => setEquipoDetalle(null)} aria-label="Cerrar detalle" className="rounded border px-3 py-1">Cerrar</button>
+              <button type="button" onClick={cerrarDetalle} aria-label="Cerrar detalle" className="rounded border px-3 py-1">Cerrar</button>
             </div>
             {error && (
               <p role="alert" className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
@@ -1767,7 +2050,7 @@ export default function Equipos() {
                   <div><dt className="text-slate-500">Número de serie</dt><dd className="font-medium">{equipoDetalle.numero_serie ?? '—'}</dd></div>
                   <div><dt className="text-slate-500">Código patrimonial</dt><dd className="font-medium">{equipoDetalle.codigo_patrimonial ?? '—'}</dd></div>
                   <div><dt className="text-slate-500">Estado operativo</dt><dd className="font-medium">{equipoDetalle.situacion === 'baja' ? 'Dado de baja' : etiquetasEstado[equipoDetalle.estado_operativo]}</dd></div>
-                  <div><dt className="text-slate-500">Ubicación / posición</dt><dd className="font-medium">{equipoDetalle.ambiente_id ? ambientesPorId.get(equipoDetalle.ambiente_id)?.nombre : 'Sin ubicación'}{equipoDetalle.posicion ? ` / ${equipoDetalle.posicion}` : ''}</dd></div>
+                  <div><dt className="text-slate-500">Ubicación / posición</dt><dd className="font-medium">{equipoDetalle.ambiente_id ? ubicacionDetalle ? `${ubicacionDetalle.pabellon} / ${ubicacionDetalle.piso} / ${ubicacionDetalle.codigo} — ${ubicacionDetalle.nombre}${ubicacionDetalle.activo ? '' : ' (inactivo)'}` : ambientesPorId.get(equipoDetalle.ambiente_id)?.nombre ?? 'Ubicación no disponible' : 'Sin ubicación'}{equipoDetalle.posicion ? ` / ${equipoDetalle.posicion}` : ''}</dd></div>
                   <div><dt className="text-slate-500">Responsable</dt><dd className="font-medium">{equipoDetalle.responsable_id ? responsablesPorId.get(equipoDetalle.responsable_id) ?? 'No visible' : 'Sin asignar'}</dd></div>
                   <div><dt className="text-slate-500">Adquisición / garantía</dt><dd className="font-medium">{fechaCorta(equipoDetalle.fecha_adquisicion)} / {fechaCorta(equipoDetalle.fecha_garantia)}</dd></div>
                   {puedeVerMantenimientos && <div><dt className="text-slate-500">Último mantenimiento registrado</dt><dd className="font-medium">{fechaUltimoMantenimiento ? new Date(fechaUltimoMantenimiento).toLocaleDateString() : 'Sin mantenimientos'}</dd></div>}
@@ -1811,18 +2094,41 @@ export default function Equipos() {
                     </ul>
                   ) : <p className="mt-1 text-sm text-slate-500">Sin relaciones registradas.</p>}
                   {puedeEditar && equipoDetalle.situacion === 'activo' && (
-                    <form onSubmit={(event) => void agregarRelacion(event)} className="mt-2 flex flex-wrap gap-2">
-                      <select required value={equipoRelacionado} onChange={(e) => setEquipoRelacionado(e.target.value)} className="min-w-56 flex-1 rounded border border-slate-300 px-3 py-2 text-sm">
-                        <option value="">Selecciona el equipo relacionado</option>
-                        {opcionesRelacion.map((opcion) => <option key={opcion.id} value={opcion.id}>{opcion.codigo_institucional} — {opcion.nombre}</option>)}
-                      </select>
-                      <button type="submit" className="rounded border border-slate-300 px-3 py-2 text-sm">Relacionar como periférico</button>
-                    </form>
+                    <>
+                      {errorOpcionesRelacion && (
+                        <p role="alert" className="mt-2 rounded bg-red-50 p-2 text-sm text-red-700">
+                          {errorOpcionesRelacion}
+                        </p>
+                      )}
+                      <form onSubmit={(event) => void agregarRelacion(event)} className="mt-2 flex flex-wrap gap-2">
+                        <select required value={equipoRelacionado} onChange={(e) => setEquipoRelacionado(e.target.value)} className="min-w-56 flex-1 rounded border border-slate-300 px-3 py-2 text-sm">
+                          <option value="">Selecciona el equipo relacionado</option>
+                          {opcionesRelacionCargando && <option disabled>Cargando equipos…</option>}
+                          {opcionesRelacion.map((opcion) => <option key={opcion.id} value={opcion.id}>{opcion.codigo_institucional} — {opcion.nombre}</option>)}
+                        </select>
+                        <button type="submit" disabled={opcionesRelacionCargando || Boolean(errorOpcionesRelacion)} className="rounded border border-slate-300 px-3 py-2 text-sm disabled:opacity-50">Relacionar como periférico</button>
+                      </form>
+                    </>
                   )}
                 </div>
 
                 <div>
                   <h4 className="font-semibold">Fotografías</h4>
+                  {fotografiasCargando && (
+                    <p role="status" className="mt-2 text-sm text-slate-500">Cargando fotografías…</p>
+                  )}
+                  {errorFotografias && (
+                    <div role="alert" className="mt-2 flex flex-wrap items-center gap-2 rounded-lg bg-red-50 p-3 text-sm text-red-700">
+                      <span>{errorFotografias}</span>
+                      <button
+                        type="button"
+                        onClick={() => void refrescarFotografias(equipoDetalle.id).catch(() => undefined)}
+                        className="font-semibold underline"
+                      >
+                        Reintentar
+                      </button>
+                    </div>
+                  )}
                   {fotografias.length ? (
                     <div className="mt-2 flex flex-wrap gap-3">
                       {fotografias.map((fotografia) => (
@@ -1858,31 +2164,68 @@ export default function Equipos() {
                         </div>
                       ))}
                     </div>
-                  ) : <p className="mt-1 text-sm text-slate-500">Sin fotografías.</p>}
+                  ) : !fotografiasCargando && !errorFotografias && (
+                    <p className="mt-1 text-sm text-slate-500">Sin fotografías.</p>
+                  )}
                   {puedeEditar && equipoDetalle.situacion === 'activo' && (
-                    <form onSubmit={(event) => void agregarFoto(event)} className="mt-2 flex flex-wrap items-center gap-2">
-                      <input
-                        type="file"
-                        required
-                        accept="image/jpeg,image/png,image/webp"
-                        onChange={(e) => {
-                          seleccionarFotografiaPrincipal(e.target.files?.[0])
-                          e.currentTarget.value = ''
-                        }}
-                        className="text-sm"
-                      />
-                      <button type="submit" disabled={!foto || gestionandoFoto} className="rounded border border-slate-300 px-3 py-2 text-sm disabled:opacity-50">
-                        {gestionandoFoto ? 'Subiendo...' : 'Agregar fotografía'}
+                    <div className="mt-2">
+                      <button type="button" onClick={() => void irAEditarParaAgregarFoto()} disabled={gestionandoFoto} className="min-h-10 rounded border border-slate-300 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50">
+                        Agregar fotografía
                       </button>
-                    </form>
+                    </div>
                   )}
                 </div>
+
+                {(puedeVerMantenimientos || puedeVerMovimientos) && (
+                  <div className="grid gap-4 lg:grid-cols-2">
+                    {puedeVerMantenimientos && (
+                      <section className="rounded-lg border border-slate-200 p-4">
+                        <h4 className="font-semibold">Historial de mantenimiento</h4>
+                        {historialMantenimientos.length ? (
+                          <ul className="mt-3 space-y-2">
+                            {historialMantenimientos.map((mantenimiento) => (
+                              <li key={mantenimiento.id} className="rounded-lg bg-slate-50 p-3 text-sm">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <span className="font-semibold capitalize">{mantenimiento.tipo} · {mantenimiento.estado.replace('_', ' ')}</span>
+                                  <time className="text-xs text-slate-500">{fechaCorta(mantenimiento.fecha_mantenimiento)}</time>
+                                </div>
+                                <p className="mt-1 text-slate-600">{mantenimiento.problema_reportado || mantenimiento.descripcion || 'Sin descripción'}</p>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="mt-2 text-sm text-slate-500">Sin mantenimientos registrados.</p>
+                        )}
+                      </section>
+                    )}
+                    {puedeVerMovimientos && (
+                      <section className="rounded-lg border border-slate-200 p-4">
+                        <h4 className="font-semibold">Historial de movimientos</h4>
+                        {historialMovimientos.length ? (
+                          <ul className="mt-3 space-y-2">
+                            {historialMovimientos.map((movimiento) => (
+                              <li key={movimiento.id} className="rounded-lg bg-slate-50 p-3 text-sm">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <span className="font-semibold">{movimiento.ubicacion_origen ?? 'Sin ubicación'} → {movimiento.ubicacion_destino ?? 'Sin ubicación'}</span>
+                                  <time className="text-xs text-slate-500">{fechaCorta(movimiento.fecha_movimiento)}</time>
+                                </div>
+                                <p className="mt-1 text-slate-600">{movimiento.motivo}</p>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="mt-2 text-sm text-slate-500">Sin movimientos registrados.</p>
+                        )}
+                      </section>
+                    )}
+                  </div>
+                )}
               </div>
             )}
-            <div className="mt-5 flex justify-end gap-2">
-              {puedeEditar && equipoDetalle.situacion === 'activo' && <button type="button" onClick={() => { setEquipoDetalle(null); void iniciarEdicion(equipoDetalle) }} className="rounded border border-slate-300 px-4 py-2">Editar equipo</button>}
-              {puedeDarDeBaja && equipoDetalle.situacion === 'activo' && <button type="button" onClick={() => void confirmarBaja(equipoDetalle)} className="rounded border border-red-200 px-4 py-2 text-red-700">Dar de baja</button>}
-              {puedeDarDeBaja && equipoDetalle.situacion !== 'activo' && <button type="button" onClick={() => void reactivar(equipoDetalle)} className="rounded border border-green-200 px-4 py-2 text-green-700">Reactivar equipo</button>}
+            <div className="mt-5 grid grid-cols-1 gap-2 min-[420px]:grid-cols-2 sm:flex sm:justify-end">
+              {puedeEditar && equipoDetalle.situacion === 'activo' && <button type="button" onClick={() => { cerrarDetalle(); void iniciarEdicion(equipoDetalle) }} className="min-h-10 rounded-lg border border-slate-300 px-4 py-2 text-sm">Editar equipo</button>}
+              {puedeDarDeBaja && equipoDetalle.situacion === 'activo' && <button type="button" onClick={() => void confirmarBaja(equipoDetalle)} className="min-h-10 rounded-lg border border-red-200 px-4 py-2 text-sm text-red-700">Dar de baja</button>}
+              {puedeDarDeBaja && equipoDetalle.situacion !== 'activo' && <button type="button" onClick={() => void reactivar(equipoDetalle)} className="min-h-10 rounded-lg border border-green-200 px-4 py-2 text-sm text-green-700">Reactivar equipo</button>}
             </div>
           </section>
         </div>

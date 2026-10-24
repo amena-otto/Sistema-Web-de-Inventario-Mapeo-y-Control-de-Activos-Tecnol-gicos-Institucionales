@@ -1,14 +1,37 @@
 import { useState, type FormEvent } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { supabase } from '../services/supabaseClient'
 
+function rutaRetornoSegura(valor: unknown) {
+  if (
+    typeof valor !== 'string' ||
+    !valor.startsWith('/') ||
+    valor.startsWith('//') ||
+    valor.includes('\\')
+  ) {
+    return '/'
+  }
+  try {
+    const destino = new URL(valor, window.location.origin)
+    return destino.origin === window.location.origin
+      ? `${destino.pathname}${destino.search}${destino.hash}`
+      : '/'
+  } catch {
+    return '/'
+  }
+}
+
 export default function Login() {
   const { session, perfil, cargando, errorAcceso, limpiarErrorAcceso } = useAuth()
+  const location = useLocation()
   const [correo, setCorreo] = useState('')
   const [contrasena, setContrasena] = useState('')
   const [error, setError] = useState('')
   const [enviando, setEnviando] = useState(false)
+  const rutaDespuesDeLogin = rutaRetornoSegura(
+    (location.state as { from?: unknown } | null)?.from,
+  )
 
   if (cargando) {
     return (
@@ -19,7 +42,7 @@ export default function Login() {
   }
 
   if (session && perfil) {
-    return <Navigate to="/" replace />
+    return <Navigate to={rutaDespuesDeLogin} replace />
   }
 
   async function iniciarSesion(event: FormEvent<HTMLFormElement>) {
