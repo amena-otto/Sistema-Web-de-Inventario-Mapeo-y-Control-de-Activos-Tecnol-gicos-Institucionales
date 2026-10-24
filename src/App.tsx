@@ -1,4 +1,4 @@
-import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import { Suspense, lazy, type ReactNode } from 'react'
 import AdminLayout from './layouts/AdminLayout'
 import Dashboard from './pages/dashboard'
@@ -16,6 +16,7 @@ const Ubicaciones = lazy(() => import('./pages/Ubicaciones'))
 
 function RutaProtegida() {
   const { session, perfil, cargando } = useAuth()
+  const location = useLocation()
 
   if (cargando) {
     return (
@@ -26,7 +27,13 @@ function RutaProtegida() {
   }
 
   if (!session || !perfil) {
-    return <Navigate to="/login" replace />
+    return (
+      <Navigate
+        to="/login"
+        replace
+        state={{ from: `${location.pathname}${location.search}${location.hash}` }}
+      />
+    )
   }
 
   return <Outlet />

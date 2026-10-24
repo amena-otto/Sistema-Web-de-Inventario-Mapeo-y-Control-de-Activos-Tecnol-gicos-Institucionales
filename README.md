@@ -9,10 +9,29 @@ institucional mediante Supabase.
 2. Copia `.env.example` a `.env`.
 3. Completa `VITE_SUPABASE_URL` y `VITE_SUPABASE_PUBLISHABLE_KEY` con los datos
    públicos del proyecto Supabase.
-4. Ejecuta `npm run dev`.
+4. `VITE_APP_URL` está configurado para desarrollo y producción con el dominio
+   público de Workers, así los QR generados localmente también abren la aplicación
+   publicada y permiten descargar e imprimir etiquetas.
+5. Ejecuta `npm run dev`.
 
 No agregues claves `service_role` ni credenciales administrativas al frontend.
 El archivo `.env` está excluido de Git.
+
+## Publicación en Cloudflare Workers
+
+El Worker está configurado en `wrangler.toml` para publicar `dist/` y responder
+con la SPA en rutas directas como `/equipos?equipo=<UUID>`. El dominio actual es
+`https://sistema-web-de-inventario.amena-f7f.workers.dev`.
+
+Para publicar los cambios:
+
+1. Autentícate con `npx wrangler login`.
+2. Ejecuta `npm run build`.
+3. Publica con `npx wrangler deploy`.
+
+Si cambia el dominio, actualiza `VITE_APP_URL` en `.env.development`,
+`.env.production` y `.env.example`; también actualiza `Site URL`, `Redirect URLs`
+y el secreto `APP_URL` de Supabase.
 
 ## Configuración de autenticación
 
@@ -22,9 +41,11 @@ El archivo `.env` está excluido de Git.
   Edge Function `admin-crear-usuario`.
 - Configura la URL del sitio y las URL de redirección permitidas para el
   entorno; incluye `/restablecer-password` para el enlace de recuperación.
-  Para producción, `Site URL` debe ser el dominio público de Cloudflare Pages
-  (o el dominio personalizado), nunca `localhost`. Añade también la URL exacta
-  `https://TU-DOMINIO/restablecer-password` a `Redirect URLs`.
+  Para producción, `Site URL` debe ser
+  `https://sistema-web-de-inventario.amena-f7f.workers.dev` (o el dominio
+  personalizado), nunca `localhost`. Añade también
+  `https://sistema-web-de-inventario.amena-f7f.workers.dev/restablecer-password`
+  a `Redirect URLs`.
 - Cada cuenta de Auth debe tener un perfil relacionado por el mismo `id`, con
   un rol válido (`admin`, `tecnico` o `consulta`) y `activo = true`.
 - La tabla de usuarios muestra los correos de inicio de sesión mediante la
@@ -57,10 +78,11 @@ El archivo `.env` está excluido de Git.
   referencias históricas no se borran para no perder la trazabilidad; la
   función informa ese caso y conserva la cuenta desactivada.
 - Configura el secreto `APP_URL` de las funciones de invitación y
-  restablecimiento como el origen publicado, por ejemplo
-  `https://TU-SITIO.pages.dev` (sin `localhost` ni `/restablecer-password`).
+  restablecimiento como
+  `https://sistema-web-de-inventario.amena-f7f.workers.dev` (sin `localhost`
+  ni `/restablecer-password`).
   Puedes actualizarlo desde **Supabase Dashboard → Edge Functions → Secrets**
-  o con `npx supabase secrets set APP_URL=https://TU-SITIO.pages.dev`.
+  o con `npx supabase secrets set APP_URL=https://sistema-web-de-inventario.amena-f7f.workers.dev`.
   Supabase Auth envía el correo usando su proveedor SMTP configurado; para
   producción se recomienda configurar un SMTP propio en **Authentication →
   SMTP Settings**. No se necesita una API de correo en el frontend.
@@ -106,6 +128,14 @@ secretos en las fichas de inventario.
 - En Equipos se pueden registrar/editar activos, consultar detalle, filtrar y
   paginar; las características técnicas se guardan en `componentes`. CPU,
   monitor y periféricos son activos independientes asociados desde el detalle.
+- Cada fila de Equipos permite abrir y descargar una etiqueta QR en PNG, o
+  imprimirla individualmente. El enlace usa el UUID del equipo en
+  `/equipos?equipo=<UUID>`; esa ruta abre la ficha existente y requiere
+  autenticación y permiso de inventario. Las etiquetas oficiales requieren
+  `VITE_APP_URL` configurado al dominio HTTPS publicado. `wrangler.toml`
+  habilita la resolución SPA de rutas directas en Cloudflare Workers. La
+  impresión por lote queda como mejora posterior; actualmente se imprimen
+  etiquetas individuales.
 - La importación CSV usa la plantilla descargable, admite hasta 500 filas y
   comunica errores por fila. Admite separadores coma, punto y coma o tabulación,
   codificaciones UTF-8/UTF-16/Windows-1252, y normaliza mayúsculas y tildes al

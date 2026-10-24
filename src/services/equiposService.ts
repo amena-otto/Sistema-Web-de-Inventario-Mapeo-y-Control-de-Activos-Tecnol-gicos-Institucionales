@@ -59,6 +59,13 @@ export type Ambiente = {
   piso: string
   pabellon: string
 }
+export type UbicacionEquipo = {
+  codigo: string
+  nombre: string
+  activo: boolean
+  piso: string
+  pabellon: string
+}
 export type Responsable = {
   id: string
   nombres: string
@@ -87,6 +94,7 @@ export type Fotografia = {
   descripcion: string | null
   tipo: string
 }
+export type FotografiaConUrl = Fotografia & { url: string }
 
 export async function cargarCatalogos() {
   const [categoriasResult, ambientesResult, responsablesResult] =
@@ -394,11 +402,11 @@ export async function posiblesDuplicados(
   return [...encontrados.values()]
 }
 
-export async function obtenerDetalleEquipo(
+export async function obtenerDatosDetalleEquipo(
   id: string,
-  puedeVerMantenimientos: boolean,
+  ambienteId?: string | null,
 ) {
-  const [componentes, relaciones, fotos, mantenimientos] = await Promise.all([
+  const [componentes, relaciones, ubicacionResult] = await Promise.all([
     supabase
       .from('componentes')
       .select('id, tipo, marca, modelo, capacidad, numero_serie, observaciones')
@@ -408,30 +416,56 @@ export async function obtenerDetalleEquipo(
       .from('relaciones_equipos')
       .select('id, equipo_principal_id, equipo_relacionado_id, tipo_relacion')
       .or(`equipo_principal_id.eq.${id},equipo_relacionado_id.eq.${id}`),
-    supabase
-      .from('fotografias_equipos')
-      .select('id, ruta_storage, drive_file_id, descripcion, tipo')
-      .eq('equipo_id', id)
-      .order('created_at', { ascending: false })
-      .order('id'),
-    puedeVerMantenimientos
+    ambienteId
       ? supabase
-          .from('mantenimientos')
-          .select('created_at')
-          .eq('equipo_id', id)
-          .order('created_at', { ascending: false })
-          .limit(1)
-      : Promise.resolve({ data: [], error: null }),
+          .from('ambientes')
+          .select('codigo, nombre, activo, pisos!inner(nombre, pabellones!inner(nombre))')
+          .eq('id', ambienteId)
+          .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
   ])
 
   if (componentes.error) throw componentes.error
   if (relaciones.error) throw relaciones.error
-  if (fotos.error) throw fotos.error
-  if (mantenimientos.error) throw mantenimientos.error
+  if (ubicacionResult.error) throw ubicacionResult.error
+
+  const ubicacionFila = ubicacionResult.data as unknown as {
+    codigo: string
+    nombre: string
+    activo: boolean
+    pisos: { nombre: string; pabellones: { nombre: string } }
+  } | null
+  const ubicacion = ubicacionFila
+    ? {
+        codigo: ubicacionFila.codigo,
+        nombre: ubicacionFila.nombre,
+        activo: ubicacionFila.activo,
+        piso: ubicacionFila.pisos.nombre,
+        pabellon: ubicacionFila.pisos.pabellones.nombre,
+      }
+    : null
+
+  return {
+    componentes: (componentes.data ?? []) as Componente[],
+    relaciones: (relaciones.data ?? []) as RelacionEquipo[],
+    ubicacion,
+  }
+}
+
+export async function obtenerFotografiasEquipo(
+  equipoId: string,
+): Promise<FotografiaConUrl[]> {
+  const { data, error } = await supabase
+    .from('fotografias_equipos')
+    .select('id, ruta_storage, drive_file_id, descripcion, tipo')
+    .eq('equipo_id', equipoId)
+    .order('created_at', { ascending: false })
+    .order('id')
+  if (error) throw error
 
   let principalElegida = false
-  const fotografias = await Promise.all(
-    (fotos.data ?? []).map(async (foto) => {
+  const resultados = await Promise.allSettled(
+    (data ?? []).map(async (foto) => {
       let tipo = foto.tipo
       if (tipo === 'principal') {
         if (principalElegida) tipo = 'adicional'
@@ -450,12 +484,32 @@ export async function obtenerDetalleEquipo(
       return { ...foto, tipo, url: data.signedUrl }
     }),
   )
+  const fallida = resultados.find((resultado) => resultado.status === 'rejected')
+  if (fallida?.status === 'rejected') {
+    resultados.forEach((resultado) => {
+      if (resultado.status === 'fulfilled' && resultado.value.url.startsWith('blob:')) {
+        URL.revokeObjectURL(resultado.value.url)
+      }
+    })
+    throw fallida.reason
+  }
+  return resultados.map((resultado) => {
+    if (resultado.status !== 'fulfilled') throw resultado.reason
+    return resultado.value
+  })
+}
 
+export async function obtenerDetalleEquipo(
+  id: string,
+  ambienteId?: string | null,
+) {
+  const [detalle, fotografias] = await Promise.all([
+    obtenerDatosDetalleEquipo(id, ambienteId),
+    obtenerFotografiasEquipo(id),
+  ])
   return {
-    componentes: (componentes.data ?? []) as Componente[],
-    relaciones: (relaciones.data ?? []) as RelacionEquipo[],
+    ...detalle,
     fotografias,
-    fechaUltimoMantenimiento: mantenimientos.data?.[0]?.created_at ?? null,
   }
 }
 
