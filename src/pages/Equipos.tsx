@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import EquipoQrDialog from '../components/EquipoQrDialog'
+import ConfirmarEliminacionEquipo from '../components/ConfirmarEliminacionEquipo'
 import { listarHistorialMovimientos, type Movimiento } from '../services/movimientosService'
 import { listarMantenimientos, type Mantenimiento } from '../services/mantenimientosService'
 import { usePermissions } from '../hooks/usePermissions'
@@ -115,8 +116,12 @@ export default function Equipos() {
   const [actualizacion, setActualizacion] = useState(0)
   const [pagina, setPagina] = useState(1)
   const [verHistorialCompleto, setVerHistorialCompleto] = useState(false)
+  const verEquiposDadosDeBaja = searchParams.get('estado') === 'baja'
   const [busqueda, setBusqueda] = useState('')
-  const [estado, setEstado] = useState(() => searchParams.get('estado') ?? '')
+  const [estado, setEstado] = useState(() => {
+    const estadoInicial = searchParams.get('estado') ?? ''
+    return estadoInicial === 'baja' ? '' : estadoInicial
+  })
   const [categoriaFiltro, setCategoriaFiltro] = useState(() => searchParams.get('categoria') ?? '')
   const [ambienteFiltro, setAmbienteFiltro] = useState(() => searchParams.get('ambiente') ?? '')
   const [ambienteFiltrosIds, setAmbienteFiltrosIds] = useState(() => searchParams.getAll('ambientes'))
@@ -156,6 +161,7 @@ export default function Equipos() {
   const [foto, setFoto] = useState<ArchivoConVista | null>(null)
   const [fotoAdicional, setFotoAdicional] = useState<ArchivoConVista[]>([])
   const [gestionandoFoto, setGestionandoFoto] = useState(false)
+  const [equipoAEliminar, setEquipoAEliminar] = useState<Equipo | null>(null)
   const solicitudDetalle = useRef(0)
   const solicitudFotografias = useRef(0)
   const solicitudEdicion = useRef(0)
@@ -243,14 +249,19 @@ export default function Equipos() {
     let vigente = true
     listarEquipos({
       pagina,
-      porPagina: verHistorialCompleto ? porPagina : registrosRecientes,
+      porPagina: verHistorialCompleto || verEquiposDadosDeBaja ? porPagina : registrosRecientes,
       busqueda,
-      estado,
+      estado: verEquiposDadosDeBaja ? '' : estado,
+      situacion: verEquiposDadosDeBaja
+        ? 'baja'
+        : estado === 'archivado'
+          ? 'archivado'
+          : 'activo',
       categoriaId: categoriaFiltro,
       ambienteId: ambienteFiltro,
       ambienteIds: ambienteFiltrosIds.length ? ambienteFiltrosIds : undefined,
       sinUbicacion: sinUbicacionFiltro,
-      ordenReciente: !verHistorialCompleto,
+      ordenReciente: !verHistorialCompleto && !verEquiposDadosDeBaja,
     })
       .then((resultado) => {
         if (!vigente) return
@@ -266,7 +277,7 @@ export default function Equipos() {
     return () => {
       vigente = false
     }
-  }, [pagina, busqueda, estado, categoriaFiltro, ambienteFiltro, ambienteFiltrosIds, sinUbicacionFiltro, actualizacion, verHistorialCompleto])
+  }, [pagina, busqueda, estado, categoriaFiltro, ambienteFiltro, ambienteFiltrosIds, sinUbicacionFiltro, actualizacion, verHistorialCompleto, verEquiposDadosDeBaja])
 
   const paginas = Math.max(1, Math.ceil(total / porPagina))
   const categoriasPorId = useMemo(
@@ -295,12 +306,31 @@ export default function Equipos() {
     equipoDetalleIdActual.current = null
     setEquipoDetalle(null)
     setFotografiasCargando(false)
+    setEquipoAEliminar(null)
     if (searchParams.has('equipo')) {
       const parametros = new URLSearchParams(searchParams)
       parametros.delete('equipo')
       setSearchParams(parametros, { replace: true })
     }
   }, [searchParams, setSearchParams])
+  const seleccionarVistaEquipos = useCallback(
+    (verDadosDeBaja: boolean) => {
+      setPagina(1)
+      setSearchParams(
+        (actuales) => {
+          const parametros = new URLSearchParams(actuales)
+          if (verDadosDeBaja) {
+            parametros.set('estado', 'baja')
+          } else if (parametros.get('estado') === 'baja') {
+            parametros.delete('estado')
+          }
+          return parametros
+        },
+        { replace: true },
+      )
+    },
+    [setSearchParams],
+  )
 
   function crearVistaArchivo(archivo: File): ArchivoConVista {
     const vista = URL.createObjectURL(archivo)
@@ -690,10 +720,12 @@ export default function Equipos() {
               equipoId: equipo.id,
               responsableId: '',
               estado: '',
+              tipo: '',
+              estadoEquipo: '',
               desde: '',
               hasta: '',
               revisionVencida: false,
-              ordenReciente: true,
+              ordenReciente: false,
               pagina: 1,
               porPagina: 5,
             })
@@ -712,7 +744,9 @@ export default function Equipos() {
       setComponentes(detalle.componentes)
       setRelaciones(detalle.relaciones)
       setUbicacionDetalle(detalle.ubicacion)
-      setFechaUltimoMantenimiento(mantenimientos.mantenimientos[0]?.created_at ?? null)
+      setFechaUltimoMantenimiento(
+        mantenimientos.mantenimientos[0]?.fecha_mantenimiento ?? null,
+      )
       setHistorialMantenimientos(mantenimientos.mantenimientos)
       setHistorialMovimientos(movimientos.movimientos)
     } catch (e) {
@@ -900,6 +934,20 @@ export default function Equipos() {
     }
   }
 
+  function solicitarEliminacionDefinitiva(equipo: Equipo) {
+    setEquipoAEliminar(equipo)
+  }
+
+  function finalizarEliminacionDefinitiva(equipo: Equipo) {
+    setAviso(
+      `El equipo ${equipo.codigo_institucional} se eliminó definitivamente. La constancia de la baja quedó registrada en la auditoría.`,
+    )
+    if (equipoDetalle?.id === equipo.id) cerrarDetalle()
+    setEquipoAEliminar(null)
+    setPagina(1)
+    setActualizacion((actual) => actual + 1)
+  }
+
   return (
     <section className="flex min-w-0 flex-col gap-4">
       <div className="flex flex-col items-stretch justify-between gap-4 sm:flex-row sm:items-start">
@@ -941,6 +989,34 @@ export default function Equipos() {
           {aviso}
         </p>
       )}
+      <div role="tablist" aria-label="Situación de los equipos" className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={!verEquiposDadosDeBaja}
+          onClick={() => seleccionarVistaEquipos(false)}
+          className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
+            !verEquiposDadosDeBaja
+              ? 'bg-orange-500 text-white shadow-sm'
+              : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+          }`}
+        >
+          Inventario
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={verEquiposDadosDeBaja}
+          onClick={() => seleccionarVistaEquipos(true)}
+          className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
+            verEquiposDadosDeBaja
+              ? 'bg-orange-500 text-white shadow-sm'
+              : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+          }`}
+        >
+          Equipos dados de baja
+        </button>
+      </div>
       <div className="mt-5 grid min-w-0 gap-3 rounded-xl bg-white p-3 shadow sm:grid-cols-2 sm:p-4 lg:grid-cols-4">
         <input
           type="search"
@@ -986,7 +1062,8 @@ export default function Equipos() {
           ))}
         </select>
         <select
-          value={estado}
+          value={verEquiposDadosDeBaja ? 'baja' : estado}
+          disabled={verEquiposDadosDeBaja}
           onChange={(event) => {
             setEstado(event.target.value)
             setPagina(1)
@@ -994,12 +1071,13 @@ export default function Equipos() {
           aria-label="Filtrar por estado"
           className="min-w-0 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"
         >
-          <option value="">Todos los estados</option>
+          {verEquiposDadosDeBaja
+            ? <option value="baja">Equipos dados de baja</option>
+            : <option value="">Todos los equipos activos</option>}
           {estadosOperativos.map((opcion) => (
             <option key={opcion} value={opcion}>{etiquetasEstado[opcion]}</option>
           ))}
-          <option value="baja">Dado de baja</option>
-          <option value="archivado">Archivado</option>
+          {!verEquiposDadosDeBaja && <option value="archivado">Archivado</option>}
         </select>
       </div>
 
@@ -1027,18 +1105,24 @@ export default function Equipos() {
       <div className="mt-4 min-w-0 overflow-hidden rounded-xl bg-white shadow">
         <div className="flex flex-col items-stretch justify-between gap-3 border-b border-slate-100 px-3 py-3 sm:flex-row sm:items-center sm:px-4">
           <h2 className="min-w-0 font-semibold text-slate-800">
-            {verHistorialCompleto ? 'Historial completo de equipos' : 'Últimos equipos registrados'}
+            {verEquiposDadosDeBaja
+              ? 'Equipos dados de baja'
+              : verHistorialCompleto
+                ? 'Historial completo de equipos'
+                : 'Últimos equipos registrados'}
           </h2>
-          <button
-            type="button"
-            onClick={() => {
-              setPagina(1)
-              setVerHistorialCompleto((actual) => !actual)
-            }}
-            className="w-full rounded-lg border border-blue-200 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 sm:w-auto"
-          >
-            {verHistorialCompleto ? 'Ver últimos registros' : 'Ver historial completo'}
-          </button>
+          {!verEquiposDadosDeBaja && (
+            <button
+              type="button"
+              onClick={() => {
+                setPagina(1)
+                setVerHistorialCompleto((actual) => !actual)
+              }}
+              className="w-full rounded-lg border border-blue-200 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 sm:w-auto"
+            >
+              {verHistorialCompleto ? 'Ver últimos registros' : 'Ver historial completo'}
+            </button>
+          )}
         </div>
         <div className="divide-y divide-slate-100 md:hidden">
           {cargando && <p role="status" className="px-4 py-8 text-center text-sm text-slate-500">Cargando inventario...</p>}
@@ -1763,6 +1847,14 @@ export default function Equipos() {
                         ) : (
                           <p className="mt-2 text-sm text-slate-500">Sin mantenimientos registrados.</p>
                         )}
+                        {equipoDetalle && (
+                          <Link
+                            to={`/mantenimientos?equipo=${equipoDetalle.id}`}
+                            className="mt-3 inline-flex text-sm font-semibold text-blue-700 hover:text-blue-900"
+                          >
+                            Ver todo el historial de este equipo
+                          </Link>
+                        )}
                       </section>
                     )}
                     {puedeVerMovimientos && (
@@ -1793,9 +1885,26 @@ export default function Equipos() {
               {puedeEditar && equipoDetalle.situacion === 'activo' && <button type="button" onClick={() => { cerrarDetalle(); void iniciarEdicion(equipoDetalle) }} className="min-h-10 rounded-lg border border-slate-300 px-4 py-2 text-sm">Editar equipo</button>}
               {puedeDarDeBaja && equipoDetalle.situacion === 'activo' && <button type="button" onClick={() => void confirmarBaja(equipoDetalle)} className="min-h-10 rounded-lg border border-red-200 px-4 py-2 text-sm text-red-700">Dar de baja</button>}
               {puedeDarDeBaja && equipoDetalle.situacion !== 'activo' && <button type="button" onClick={() => void reactivar(equipoDetalle)} className="min-h-10 rounded-lg border border-green-200 px-4 py-2 text-sm text-green-700">Reactivar equipo</button>}
+              {puedeDarDeBaja && equipoDetalle.situacion === 'baja' && (
+                <button
+                  type="button"
+                  onClick={() => solicitarEliminacionDefinitiva(equipoDetalle)}
+                  className="min-h-10 rounded-lg border border-red-300 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100"
+                >
+                  Eliminar definitivamente
+                </button>
+              )}
             </div>
           </section>
         </div>
+      )}
+
+      {equipoAEliminar && (
+        <ConfirmarEliminacionEquipo
+          equipo={equipoAEliminar}
+          onCancelar={() => setEquipoAEliminar(null)}
+          onEliminado={finalizarEliminacionDefinitiva}
+        />
       )}
     </section>
   )

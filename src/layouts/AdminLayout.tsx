@@ -11,7 +11,7 @@ const menu: {
   clave: string
   icono: string
 }[] = [
-  { to: '/', label: 'Dashboard', permiso: 'inventario.ver', clave: 'D', icono: 'M3 10.5 12 3l9 7.5M5.5 9v11h13V9M9 20v-6h6v6' },
+  { to: '/dashboard', label: 'Dashboard', permiso: 'inventario.ver', clave: 'D', icono: 'M3 10.5 12 3l9 7.5M5.5 9v11h13V9M9 20v-6h6v6' },
   { to: '/equipos', label: 'Equipos', permiso: 'inventario.ver', clave: 'EQ', icono: 'M4 5h16v11H4zM8 20h8M12 16v4' },
   { to: '/ubicaciones', label: 'Ubicaciones', permiso: 'inventario.ver', clave: 'UB', icono: 'M19 10c0 5-7 11-7 11S5 15 5 10a7 7 0 1 1 14 0ZM12 10h.01' },
   { to: '/mantenimientos', label: 'Mantenimientos', permiso: 'mantenimientos.ver', clave: 'MT', icono: 'M14.5 6.5a4 4 0 0 0-5 5L4 17l3 3 5.5-5.5a4 4 0 0 0 5-5l-2.5 2.5-3-3z' },
@@ -36,8 +36,10 @@ export default function AdminLayout() {
   const location = useLocation()
   const menuVisible = menu.filter((item) => can(item.permiso))
   const seccionActual =
-    menuVisible.find((item) =>
-      item.to === '/' ? location.pathname === '/' : location.pathname.startsWith(item.to),
+    menuVisible.find(
+      (item) =>
+        location.pathname === item.to ||
+        location.pathname.startsWith(`${item.to}/`),
     )?.label ?? 'Institucional'
   const iniciales = `${perfil?.nombres?.[0] ?? 'U'}${perfil?.apellidos?.[0] ?? ''}`.toUpperCase()
 
@@ -89,7 +91,7 @@ export default function AdminLayout() {
             <NavLink
               key={item.to}
               to={item.to}
-              end={item.to === '/'}
+              end={item.to === '/dashboard'}
               onClick={() => setAbierto(false)}
               title={menuContraido ? item.label : undefined}
               className={({ isActive }) =>

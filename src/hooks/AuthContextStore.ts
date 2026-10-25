@@ -16,6 +16,7 @@ export type AuthContextType = {
   errorAcceso: string
   limpiarErrorAcceso: () => void
   cerrarSesion: () => Promise<void>
+  verificarAcceso: () => Promise<void>
 }
 
 export const AuthContext = createContext<AuthContextType | undefined>(undefined)

@@ -523,6 +523,8 @@ export default function Reportes() {
       equipoId: '',
       responsableId: '',
       estado: '',
+      tipo: '',
+      estadoEquipo: '',
       desde,
       hasta,
       revisionVencida: false,
@@ -722,22 +724,49 @@ export default function Reportes() {
         const equiposPorId = new Map(equiposFiltrados.map((equipo) => [equipo.id, equipo]))
         encabezados = [
           'Código institucional', 'Equipo', 'Número de serie', 'Tipo',
-          'Fecha de mantenimiento', 'Estado', 'Problema reportado',
-          'Diagnóstico', 'Acciones realizadas', 'Próxima revisión',
+          'Fecha de mantenimiento', 'Estado de la intervención',
+          'Estado del equipo', 'Técnico responsable', 'Problema reportado',
+          'Diagnóstico', 'Acciones realizadas', 'Componentes reemplazados',
+          'Resultado', 'Observaciones', 'Próxima revisión',
+          'Cambios de estado derivados',
         ]
         registros = historial.map((item) => {
           const equipo = equiposPorId.get(item.equipo_id)
+          const estadoEquipo =
+            item.equipo?.estado_operativo ?? equipo?.estado_operativo ?? ''
           return {
             'Código institucional': equipo?.codigo_institucional ?? item.equipo?.codigo_institucional ?? '',
             Equipo: equipo?.nombre ?? item.equipo?.nombre ?? '',
             'Número de serie': equipo?.numero_serie ?? '',
             Tipo: item.tipo,
             'Fecha de mantenimiento': item.fecha_mantenimiento,
-            Estado: item.estado,
+            'Estado de la intervención': item.estado,
+            'Estado del equipo': estadoEquipo
+              ? estadosLabel[estadoEquipo] ?? estadoEquipo
+              : '',
+            'Técnico responsable': item.responsable
+              ? `${item.responsable.nombres} ${item.responsable.apellidos}`.trim()
+              : '',
             'Problema reportado': item.problema_reportado || item.descripcion || '',
             Diagnóstico: item.diagnostico ?? '',
             'Acciones realizadas': item.acciones_realizadas ?? '',
+            'Componentes reemplazados': item.componentes_reemplazados ?? '',
+            Resultado: item.resultado ?? '',
+            Observaciones: item.observaciones ?? '',
             'Próxima revisión': item.proxima_revision ?? '',
+            'Cambios de estado derivados': item.cambios
+              .map((cambio) => {
+                const fecha = cambio.created_at.slice(0, 10)
+                const intervencion = `${cambio.estado_mantenimiento_anterior ?? 'alta'} → ${cambio.estado_mantenimiento_nuevo}`
+                const equipoCambio =
+                  cambio.estado_equipo_nuevo &&
+                  cambio.estado_equipo_anterior !== cambio.estado_equipo_nuevo
+                    ? `; equipo ${cambio.estado_equipo_anterior ?? '—'} → ${cambio.estado_equipo_nuevo}`
+                    : ''
+                const motivo = cambio.motivo ? `; motivo: ${cambio.motivo}` : ''
+                return `${fecha}: ${intervencion}${equipoCambio}${motivo}`
+              })
+              .join(' | '),
           }
         })
       } else if (tipo === 'movimientos') {

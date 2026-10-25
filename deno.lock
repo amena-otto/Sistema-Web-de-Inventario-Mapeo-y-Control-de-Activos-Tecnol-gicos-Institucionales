@@ -1,0 +1,33 @@
+{
+  "version": "5",
+  "remote": {
+    "https://deno.land/std@0.224.0/async/delay.ts": "f90dd685b97c2f142b8069082993e437b1602b8e2561134827eeb7c12b95c499",
+    "https://deno.land/std@0.224.0/http/server.ts": "f9313804bf6467a1704f45f76cb6cd0a3396a3b31c316035e6a4c2035d1ea514"
+  },
+  "workspace": {
+    "packageJson": {
+      "dependencies": [
+        "npm:@eslint/js@^10.0.1",
+        "npm:@supabase/supabase-js@^2.118.0",
+        "npm:@tailwindcss/vite@^4.3.3",
+        "npm:@types/node@^24.19.2",
+        "npm:@types/qrcode@^1.5.6",
+        "npm:@types/react-dom@^19.3.0",
+        "npm:@types/react@^19.3.0",
+        "npm:@vitejs/plugin-react@^6.1.2",
+        "npm:eslint-plugin-react-hooks@^7.1.1",
+        "npm:eslint-plugin-react-refresh@~0.5.7",
+        "npm:eslint@^10.13.0",
+        "npm:globals@^17.13.0",
+        "npm:qrcode@^1.5.4",
+        "npm:react-dom@^19.3.1",
+        "npm:react-router-dom@^7.18.4",
+        "npm:react@^19.3.1",
+        "npm:tailwindcss@^4.3.3",
+        "npm:typescript-eslint@^8.71.2",
+        "npm:typescript@5.9",
+        "npm:vite@^8.3.4"
+      ]
+    }
+  }
+}

@@ -18,13 +18,15 @@ La base de datos está organizada en las siguientes tablas:
 3. categorias_equipos
 4. componentes
 5. equipos
-6. fotografias_equipos
-7. mantenimientos
-8. movimientos
-9. pabellones
-10. pisos
-11. profiles
-12. relaciones_equipos
+6. equipos_eliminados
+7. fotografias_equipos
+8. mantenimientos
+9. mantenimiento_cambios_estado
+10. movimientos
+11. pabellones
+12. pisos
+13. profiles
+14. relaciones_equipos
 
 ## 3. Columnas y tipos de datos
 
@@ -87,3 +89,29 @@ El registro se hace mediante una función transaccional que persiste el historia
 y actualiza ubicación, posición y responsable actuales del equipo. Un trigger
 impide cambiar esos campos por fuera de un movimiento registrado; los clientes
 no tienen permisos para insertar, modificar ni borrar filas del historial.
+
+La migración `supabase/migrations/011_eliminar_equipos_dados_de_baja.sql`
+agrega `equipos_eliminados`, la constancia permanente de cada baja definitiva
+(código, nombre, snapshot del equipo, cantidad de fotografías, usuario y
+fecha). La purga conserva las filas de `auditoria` y elimina únicamente el
+historial operativo del activo. Un disparador impide modificar o borrar la
+auditoría, y la función de purga solo puede ser ejecutada por `service_role`
+a través de la Edge Function `admin-eliminar-equipo`.
+
+La migración `supabase/migrations/012_eliminar_planos.sql` agrega la política de
+borrado del bucket privado `planos-institucionales`. Los planos se guardan como
+`pisos/<id-del-piso>/<uuid>.webp` y la ruta se conserva en
+`pisos.plano_storage_path`. Al eliminar el plano desde Ubicaciones, la
+aplicación desvincula la ruta del piso y borra el archivo de Storage; la
+operación está reservada a administradores activos.
+
+La migración `supabase/migrations/013_cierre_mantenimientos.sql` agrega la tabla
+`mantenimiento_cambios_estado`, que registra la transición de la intervención y
+del equipo, el motivo, el usuario y la fecha. Reemplaza la función de registro
+para admitir un técnico responsable distinto cuando lo asigna un administrador y
+crea `actualizar_mantenimiento`, que aplica las transiciones permitidas
+(`pendiente → en_proceso`, `pendiente → completado`, `en_proceso → completado`),
+exige diagnóstico, acciones y resultado al completar, y actualiza el equipo en la
+misma transacción. También corrige los indicadores y bloquea las escrituras
+directas sobre `mantenimientos`, de modo que toda modificación pase por las
+funciones transaccionales.

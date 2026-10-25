@@ -1,5 +1,7 @@
 import {
+  useCallback,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from 'react'
@@ -11,6 +13,13 @@ export type { Perfil } from './AuthContextStore'
 
 type ResultadoPerfil = { userId: string; perfil: Perfil | null }
 
+const ROLES_VALIDOS = ['admin', 'tecnico', 'consulta'] as const
+const ERROR_PERFIL = 'No se pudo verificar tu perfil de usuario.'
+const ERROR_CUENTA =
+  'Tu cuenta está desactivada o no tiene un rol asignado.'
+const ESPERA_MINIMA_VERIFICACION_MS = 30_000
+const INTERVALO_VERIFICACION_MS = 60_000
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [inicializada, setInicializada] = useState(false)
@@ -18,6 +27,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [errorAcceso, setErrorAcceso] = useState('')
 
   const userId = session?.user.id ?? null
+  const userIdRef = useRef<string | null>(userId)
+  const ultimaVerificacionRef = useRef(0)
+
+  useEffect(() => {
+    userIdRef.current = userId
+  }, [userId])
 
   useEffect(() => {
     let vigente = true
@@ -33,6 +48,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_evento, nuevaSesion) => {
       setSession(nuevaSesion)
+      if (!nuevaSesion) setResultado(null)
     })
 
     return () => {
@@ -41,56 +57,118 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  useEffect(() => {
-    if (!userId) return
+  const cerrarSesionLocal = useCallback(async () => {
+    const { error } = await supabase.auth.signOut({ scope: 'local' })
+    if (error) {
+      console.error('No se pudo cerrar la sesión local:', error.message)
+    }
+    setResultado(null)
+    setSession(null)
+  }, [])
 
-    let vigente = true
+  const consultarPerfil = useCallback(async (id: string) => {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, nombres, apellidos, rol, activo')
+      .eq('id', id)
+      .single()
 
-    const cargarPerfil = async () => {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('id, nombres, apellidos, rol, activo')
-        .eq('id', userId)
-        .single()
+    return { data, error }
+  }, [])
 
-      if (!vigente) return
+  const aplicarPerfil = useCallback(
+    async (
+      id: string,
+      data: Perfil | null,
+      error: { message: string } | null,
+    ) => {
+      if (userIdRef.current !== id) return
 
       if (error || !data) {
         console.error('No se pudo cargar el perfil:', error?.message)
-        setErrorAcceso('No se pudo verificar tu perfil de usuario.')
-        setResultado({ userId, perfil: null })
-        await supabase.auth.signOut()
+        setErrorAcceso(ERROR_PERFIL)
+        setResultado({ userId: id, perfil: null })
+        await cerrarSesionLocal()
         return
       }
 
-      const rolValido = ['admin', 'tecnico', 'consulta'].includes(data.rol)
+      const rolValido = ROLES_VALIDOS.some((rol) => rol === data.rol)
 
       if (rolValido && data.activo === true) {
-        setResultado({ userId, perfil: data as Perfil })
-      } else {
-        setErrorAcceso('Tu cuenta está desactivada o no tiene un rol asignado.')
-        setResultado({ userId, perfil: null })
-        await supabase.auth.signOut()
+        setResultado({ userId: id, perfil: data })
+        return
       }
-    }
 
-    void cargarPerfil()
+      setErrorAcceso(ERROR_CUENTA)
+      setResultado({ userId: id, perfil: null })
+      await cerrarSesionLocal()
+    },
+    [cerrarSesionLocal],
+  )
+
+  useEffect(() => {
+    if (!userId) return
+
+    ultimaVerificacionRef.current = Date.now()
+    let vigente = true
+
+    consultarPerfil(userId).then(({ data, error }) => {
+      if (!vigente) return
+      void aplicarPerfil(userId, data as Perfil | null, error)
+    })
 
     return () => {
       vigente = false
     }
-  }, [userId])
+  }, [userId, consultarPerfil, aplicarPerfil])
+
+  // Revalida el acceso mientras la pestaña está en uso, sin consultar en cada
+  // render y con un mínimo de 30 s entre verificaciones.
+  const verificarAcceso = useCallback(async () => {
+    const id = userIdRef.current
+    if (!id) return
+
+    const ahora = Date.now()
+    if (ahora - ultimaVerificacionRef.current < ESPERA_MINIMA_VERIFICACION_MS) {
+      return
+    }
+
+    ultimaVerificacionRef.current = ahora
+    const { data, error } = await consultarPerfil(id)
+    await aplicarPerfil(id, data as Perfil | null, error)
+  }, [consultarPerfil, aplicarPerfil])
+
+  useEffect(() => {
+    if (!userId) return
+
+    const verificar = () => {
+      void verificarAcceso()
+    }
+    const alCambiarVisibilidad = () => {
+      if (document.visibilityState === 'visible') verificar()
+    }
+
+    window.addEventListener('focus', verificar)
+    document.addEventListener('visibilitychange', alCambiarVisibilidad)
+    const intervalo = window.setInterval(verificar, INTERVALO_VERIFICACION_MS)
+
+    return () => {
+      window.removeEventListener('focus', verificar)
+      document.removeEventListener('visibilitychange', alCambiarVisibilidad)
+      window.clearInterval(intervalo)
+    }
+  }, [userId, verificarAcceso])
 
   const perfil = resultado && resultado.userId === userId ? resultado.perfil : null
   const cargando =
     !inicializada || (userId !== null && resultado?.userId !== userId)
 
-  const limpiarErrorAcceso = () => setErrorAcceso('')
+  const limpiarErrorAcceso = useCallback(() => setErrorAcceso(''), [])
 
-  const cerrarSesion = async () => {
+  const cerrarSesion = useCallback(async () => {
     const { error } = await supabase.auth.signOut()
     if (error) throw error
-  }
+  }, [])
 
   return (
     <AuthContext.Provider
@@ -101,6 +179,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         errorAcceso,
         limpiarErrorAcceso,
         cerrarSesion,
+        verificarAcceso,
       }}
     >
       {children}

@@ -1,11 +1,15 @@
-import { createClient } from 'npm:@supabase/supabase-js@2'
+import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2'
 
 
 const googleTokenUrl = 'https://oauth2.googleapis.com/token'
 
-function base64ToBytes(value: string): Uint8Array {
+function base64ToBytes(value: string): Uint8Array<ArrayBuffer> {
   const binary = atob(value)
-  return Uint8Array.from(binary, (char) => char.charCodeAt(0))
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+  return bytes
 }
 
 async function marcarArchivoDrive(
@@ -73,7 +77,7 @@ async function descifrarRefreshToken(
 }
 
 async function getGoogleAccessToken(
-  adminClient: ReturnType<typeof createClient>,
+  adminClient: SupabaseClient,
 ): Promise<string> {
   const clientId = Deno.env.get('GOOGLE_OAUTH_CLIENT_ID')
   const clientSecret = Deno.env.get('GOOGLE_OAUTH_CLIENT_SECRET')

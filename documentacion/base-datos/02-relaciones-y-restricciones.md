@@ -15,10 +15,12 @@ La base de datos utiliza restricciones de PostgreSQL para mantener la integridad
 | equipos | ambiente_id | ambientes | id |
 | equipos | categoria_id | categorias_equipos | id |
 | equipos | creado_por | profiles | id |
+| equipos_eliminados | eliminado_por | profiles | id |
 | fotografias_equipos | creado_por | profiles | id |
 | fotografias_equipos | equipo_id | equipos | id |
 | mantenimientos | equipo_id | equipos | id |
 | mantenimientos | responsable_id | profiles | id |
+| mantenimiento_cambios_estado | mantenimiento_id | mantenimientos | id |
 | movimientos | ambiente_destino_id | ambientes | id |
 | movimientos | ambiente_origen_id | ambientes | id |
 | movimientos | equipo_id | equipos | id |
@@ -28,6 +30,8 @@ La base de datos utiliza restricciones de PostgreSQL para mantener la integridad
 | pisos | pabellon_id | pabellones | id |
 | relaciones_equipos | equipo_principal_id | equipos | id |
 | relaciones_equipos | equipo_relacionado_id | equipos | id |
+
+`equipos_eliminados` no mantiene una clave foránea hacia `equipos`: la constancia de la baja definitiva debe sobrevivir al borrado del activo.
 
 ## 3. Claves primarias
 
@@ -55,6 +59,8 @@ Se identificaron restricciones para validar los valores y estados de los registr
 - `equipos_check`: valida la coherencia entre la situación del equipo y su eliminación lógica.
 - `equipos_estado_operativo_check`: valida el estado operativo del equipo.
 - `equipos_situacion_check`: valida la situación del equipo.
+- `mantenimiento_cambios_estado_equipo_check`: valida los estados del equipo registrados en la trazabilidad.
+- `mantenimiento_cambios_estado_mantenimiento_check`: valida los estados de la intervención registrados en la trazabilidad.
 - `mantenimientos_estado_check`: valida el estado del mantenimiento.
 - `mantenimientos_tipo_check`: valida el tipo de mantenimiento.
 - `movimientos_check`: valida una condición definida para los movimientos.
@@ -72,6 +78,13 @@ responsable y posición anteriores y nuevos. La escritura del historial y la
 actualización del equipo ocurren en una única función transaccional; un trigger
 rechaza cambios directos de ubicación, posición o responsable que no tengan un
 movimiento asociado. Las filas de movimientos son inmutables desde la API.
+
+La migración `013_cierre_mantenimientos.sql` añade
+`mantenimiento_cambios_estado`, vinculada a `mantenimientos` con borrado en
+cascada. Sus filas registran estado anterior y nuevo, motivo, usuario y fecha, y
+solo las escriben las funciones transaccionales. También restringe las
+transiciones de la intervención y exige que el equipo no quede en
+`en_mantenimiento` cuando la intervención se completa.
 
 ## 6. Integridad referencial
 

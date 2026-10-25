@@ -1,5 +1,5 @@
 import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
-import { Suspense, lazy, type ReactNode } from 'react'
+import { Suspense, lazy, useEffect, type ReactNode } from 'react'
 import AdminLayout from './layouts/AdminLayout'
 import Dashboard from './pages/dashboard'
 import Mantenimientos from './pages/Mantenimientos'
@@ -49,16 +49,30 @@ function RutaPorPermiso({
   const { can } = usePermissions()
 
   if (!can(permiso)) {
-    return <Navigate to="/" replace />
+    return <Navigate to="/dashboard" replace />
   }
 
   return children ? <>{children}</> : <Outlet />
 }
 
+function RevalidarAcceso() {
+  const { session, verificarAcceso } = useAuth()
+  const location = useLocation()
+
+  useEffect(() => {
+    if (!session) return
+    void verificarAcceso()
+  }, [session, location.pathname, verificarAcceso])
+
+  return null
+}
+
 export default function App() {
   return (
     <BrowserRouter>
+      <RevalidarAcceso />
       <Routes>
+        <Route path="/" element={<Navigate to="/login" replace />} />
         <Route path="/login" element={<Login />} />
         <Route
           path="/restablecer-password"
@@ -70,7 +84,7 @@ export default function App() {
             <Route
               element={<RutaPorPermiso permiso="inventario.ver" />}
             >
-              <Route path="/" element={<Dashboard />} />
+              <Route path="/dashboard" element={<Dashboard />} />
               <Route
                 path="/equipos"
                 element={
@@ -127,7 +141,7 @@ export default function App() {
           </Route>
         </Route>
 
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     </BrowserRouter>
   )

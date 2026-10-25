@@ -106,6 +106,18 @@ los estados de cuenta dependen de las funciones y políticas de base de datos.
 No se deben guardar contraseñas Wi-Fi, credenciales administrativas ni otros
 secretos en las fichas de inventario.
 
+## Rutas y sesión
+
+- `/` redirige siempre a `/login`; el panel principal vive en `/dashboard`.
+  Las rutas inexistentes también pasan por `/login`.
+- Las rutas protegidas exigen sesión y perfil activo, y aplican la matriz de
+  permisos; un rol sin permiso vuelve a `/dashboard`.
+- La sesión revalida el perfil al navegar, al recuperar el foco o la
+  visibilidad y cada 60 s, con un mínimo de 30 s entre consultas. Si la cuenta
+  fue desactivada o eliminada, la aplicación deja de mostrar el perfil, cierra
+  la sesión local y vuelve a `/login` con un mensaje. Las políticas RLS siguen
+  siendo la barrera del servidor.
+
 ## Módulos de inventario y mapeo
 
 - El Dashboard presenta indicadores reales del inventario, distribución de
@@ -123,8 +135,24 @@ secretos en las fichas de inventario.
   laboratorio de cómputo en los pisos 1 y 2 del pabellón C.
 - La migración 004 añade patrimonio, posición, responsable y vencimiento de
   garantía; habilita el código secuencial `OT-EQP-000001` y el estado
-  `en_almacen`. La baja es lógica y está reservada al administrador. El código
+  `en_almacen`. La baja es lógica y está reservada al administrador; el código
   institucional no se edita ni cambia al trasladar un equipo.
+- La eliminación definitiva de un equipo ya dado de baja es exclusiva del
+  administrador y se ejecuta con la Edge Function `admin-eliminar-equipo`,
+  desplegada con `npx supabase functions deploy admin-eliminar-equipo`, después
+  de ejecutar `supabase/migrations/011_eliminar_equipos_dados_de_baja.sql`.
+  Solo se permite sobre equipos en `baja`, exige escribir el código
+  institucional y borra el historial operativo del activo. La auditoría y una
+  constancia permanente en `equipos_eliminados` se conservan. La función de
+  base de datos solo puede ser invocada por `service_role`, así el cliente no
+  puede saltarse la limpieza de fotografías de Supabase Storage y Google Drive.
+- El repositorio no incluye una migración base del esquema completo. Para
+  reconstruir un entorno desde cero, enlaza el proyecto y genera el dump del
+  esquema público antes de aplicar las migraciones 004-013:
+  `npx supabase link --project-ref <ref>` y
+  `npx supabase db dump --schema public -f supabase/migrations/000_baseline.sql`.
+  Revisa el archivo generado y aplícalo como primera migración; requiere acceso
+  a la base del proyecto enlazado y no debe contener datos reales.
 - En Equipos se pueden registrar/editar activos, consultar detalle, filtrar y
   paginar; las características técnicas se guardan en `componentes`. CPU,
   monitor y periféricos son activos independientes asociados desde el detalle.
@@ -160,17 +188,32 @@ secretos en las fichas de inventario.
   datos y eliminar solo los que no tengan dependencias. Los pisos con ambientes
   y los ambientes con equipos deben vaciarse o reasignarse antes de borrarlos.
   Los equipos se consultan por jerarquía y se resumen por estado.
-  Los planos de piso se optimizan y guardan en un bucket privado. Los
-  marcadores usan coordenadas normalizadas ligadas al equipo; al mover un
-  activo a otro piso se elimina su marcador antiguo para volver a ubicarlo en
-  el plano correcto.
+  Los planos de piso se optimizan y guardan en el bucket privado
+  `planos-institucionales`, en la ruta `pisos/<id-del-piso>/<uuid>.webp`, y se
+  muestran con URL firmadas temporales. El administrador puede cargar,
+  reemplazar o eliminar el plano del piso; al eliminarlo se borra también el
+  archivo de Storage. Los marcadores usan coordenadas normalizadas ligadas al
+  equipo; al mover un activo a otro piso se elimina su marcador antiguo para
+  volver a ubicarlo en el plano correcto. El borrado del archivo requiere
+  `supabase/migrations/012_eliminar_planos.sql`.
 - La migración 005 añade la tabla de marcadores y activa los cambios en tiempo
   real para que el mapa refleje traslados de equipos.
 - Para habilitar el historial y formulario de mantenimiento, ejecuta en orden
-  `supabase/migrations/008_modulo_mantenimientos.sql` y
-  `supabase/migrations/009_tecnicos_activos_mantenimiento.sql`. Después
-  despliega la aplicación. Solo los técnicos y administradores activos aparecen
-  como opciones; los nombres de inactivos se conservan para leer el historial.
+  `supabase/migrations/008_modulo_mantenimientos.sql`,
+  `supabase/migrations/009_tecnicos_activos_mantenimiento.sql` y
+  `supabase/migrations/013_cierre_mantenimientos.sql`. Después despliega la
+  aplicación. Solo los técnicos y administradores activos aparecen como
+  opciones; los nombres de inactivos se conservan para leer el historial.
+  La migración 013 completa el ciclo de vida: el técnico responsable o un
+  administrador puede pasar una intervención de `pendiente` a `en_proceso` y a
+  `completado`, pero no retroceder. Para completar se exigen diagnóstico,
+  acciones y resultado, y el equipo no puede quedar en mantenimiento. Cada
+  cambio de estado del equipo exige motivo y queda registrado en
+  `mantenimiento_cambios_estado` junto con el usuario y la fecha. Las
+  escrituras directas sobre `mantenimientos` están bloqueadas: la aplicación
+  usa exclusivamente las funciones `registrar_mantenimiento` y
+  `actualizar_mantenimiento`. La revisión vencida se calcula sobre la última
+  intervención de cada equipo activo, aunque esté completada.
 - Para habilitar traslados y cambios de responsables con historial, ejecuta
   `supabase/migrations/010_control_movimientos.sql`. La pantalla Movimientos
   registra ubicación, posición y responsable anterior y nuevo, motivo, fecha y

@@ -1,3 +1,4 @@
+import { FunctionsHttpError } from '@supabase/supabase-js'
 import { supabase } from './supabaseClient'
 
 export const estadosOperativos = [
@@ -163,6 +164,7 @@ export async function listarEquipos({
   porPagina,
   busqueda,
   estado,
+  situacion,
   categoriaId,
   ambienteId,
   ambienteIds,
@@ -173,6 +175,7 @@ export async function listarEquipos({
   porPagina: number
   busqueda: string
   estado: string
+  situacion?: Equipo['situacion']
   categoriaId: string
   ambienteId: string
   ambienteIds?: string[]
@@ -201,12 +204,12 @@ export async function listarEquipos({
     }
   }
 
-  if (estado === 'baja') {
-    consulta = consulta.eq('situacion', 'baja')
-  } else if (estado === 'archivado') {
-    consulta = consulta.eq('situacion', 'archivado')
+  if (estado === 'baja' || estado === 'archivado') {
+    consulta = consulta.eq('situacion', estado)
   } else if (estado) {
     consulta = consulta.eq('estado_operativo', estado).eq('situacion', 'activo')
+  } else if (situacion) {
+    consulta = consulta.eq('situacion', situacion)
   }
   if (categoriaId) consulta = consulta.eq('categoria_id', categoriaId)
   if (ambienteId) {
@@ -617,6 +620,40 @@ export async function reactivarEquipo(id: string) {
     .eq('id', id)
   if (error) throw error
 }
+
+export async function eliminarEquipoDadoDeBaja(
+  id: string,
+  codigoInstitucional: string,
+): Promise<void> {
+  const { data, error } = await supabase.functions.invoke<{ success: boolean }>(
+    'admin-eliminar-equipo',
+    { body: { equipoId: id, codigoInstitucional } },
+  )
+
+  if (error) {
+    if (error instanceof FunctionsHttpError) {
+      let body: unknown
+      try {
+        body = await error.context.clone().json()
+      } catch {
+        body = null
+      }
+      if (
+        typeof body === 'object' &&
+        body !== null &&
+        'error' in body &&
+        typeof body.error === 'string'
+      ) {
+        throw new Error(body.error)
+      }
+    }
+    throw error
+  }
+  if (!data?.success) {
+    throw new Error('No se recibió confirmación de la eliminación del equipo.')
+  }
+}
+
 export async function subirFotografia(
   equipoId: string,
   archivo: File,

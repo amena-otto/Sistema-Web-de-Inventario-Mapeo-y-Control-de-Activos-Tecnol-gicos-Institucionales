@@ -250,3 +250,29 @@ export async function urlPlano(path: string) {
   if (error) throw error
   return data.signedUrl
 }
+
+export async function eliminarPlano(
+  pisoId: string,
+  rutaPlano: string,
+): Promise<string | null> {
+  const { error: pisoError } = await supabase
+    .from('pisos')
+    .update({ plano_storage_path: null })
+    .eq('id', pisoId)
+  if (pisoError) throw pisoError
+
+  if (!rutaPlano) return null
+
+  const { error: archivoError } = await supabase.storage
+    .from('planos-institucionales')
+    .remove([rutaPlano])
+  if (archivoError) {
+    console.error(
+      'El plano se desvinculó, pero no se pudo eliminar el archivo:',
+      archivoError.message,
+    )
+    return 'El plano se quitó del piso, pero el archivo no se pudo eliminar del almacenamiento.'
+  }
+
+  return null
+}

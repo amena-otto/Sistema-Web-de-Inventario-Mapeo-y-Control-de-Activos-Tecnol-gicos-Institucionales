@@ -3,6 +3,9 @@ import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { supabase } from '../services/supabaseClient'
 
+const RUTA_INICIO = '/dashboard'
+const RUTAS_NO_RETORNO = ['/', '/login', '/restablecer-password']
+
 function rutaRetornoSegura(valor: unknown) {
   if (
     typeof valor !== 'string' ||
@@ -10,15 +13,15 @@ function rutaRetornoSegura(valor: unknown) {
     valor.startsWith('//') ||
     valor.includes('\\')
   ) {
-    return '/'
+    return RUTA_INICIO
   }
   try {
     const destino = new URL(valor, window.location.origin)
-    return destino.origin === window.location.origin
-      ? `${destino.pathname}${destino.search}${destino.hash}`
-      : '/'
+    if (destino.origin !== window.location.origin) return RUTA_INICIO
+    if (RUTAS_NO_RETORNO.includes(destino.pathname)) return RUTA_INICIO
+    return `${destino.pathname}${destino.search}${destino.hash}`
   } catch {
-    return '/'
+    return RUTA_INICIO
   }
 }
 

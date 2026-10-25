@@ -6,6 +6,7 @@ import {
   eliminarAmbiente,
   eliminarPabellon,
   eliminarPiso,
+  eliminarPlano,
   guardarAmbiente,
   guardarMarcador,
   guardarPabellon,
@@ -48,6 +49,7 @@ export default function Ubicaciones() {
   const [pisoElegido, setPisoElegido] = useState('')
   const [ambienteElegido, setAmbienteElegido] = useState('')
   const [planoUrl, setPlanoUrl] = useState('')
+  const [eliminandoPlano, setEliminandoPlano] = useState(false)
   const [equipoParaMarcar, setEquipoParaMarcar] = useState('')
   const [ficha, setFicha] = useState<EquipoUbicacion | null>(null)
   const [formulario, setFormulario] = useState<TipoFormulario | null>(null)
@@ -314,6 +316,37 @@ export default function Ubicaciones() {
     }
   }
 
+  async function manejarEliminarPlano() {
+    if (!pisoActual || !rutaPlanoActual || eliminandoPlano) return
+    if (
+      !window.confirm(
+        `¿Eliminar el plano de ${pisoActual.nombre}? Esta acción no se puede deshacer. Los marcadores de equipos se conservan.`,
+      )
+    ) {
+      return
+    }
+
+    setError('')
+    setAviso('')
+    setEliminandoPlano(true)
+    try {
+      const advertencia = await eliminarPlano(pisoActual.id, rutaPlanoActual)
+      setPlanoUrl('')
+      const datosPisos = await listarPisos()
+      setPisos(datosPisos)
+      setRecarga((actual) => actual + 1)
+      if (advertencia) {
+        setError(advertencia)
+      } else {
+        setAviso(`Plano del ${pisoActual.nombre} eliminado.`)
+      }
+    } catch (e) {
+      setError(mostrarError(e, 'No se pudo eliminar el plano.'))
+    } finally {
+      setEliminandoPlano(false)
+    }
+  }
+
   async function colocarMarcador(event: MouseEvent<HTMLImageElement>) {
     if (!pisoActual || !equipoParaMarcar) return
     const rect = event.currentTarget.getBoundingClientRect()
@@ -426,10 +459,22 @@ export default function Ubicaciones() {
                   <p className="text-xs text-slate-500">Selecciona un marcador para consultar el equipo.</p>
                 </div>
                 {puedeAdministrar && (
-                  <label className="cursor-pointer rounded border border-slate-300 px-3 py-2 text-sm">
-                    Cargar o cambiar plano
-                    <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; if (file) void manejarPlano(file); event.currentTarget.value = '' }} />
-                  </label>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="cursor-pointer rounded border border-slate-300 px-3 py-2 text-sm">
+                      Cargar o cambiar plano
+                      <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; if (file) void manejarPlano(file); event.currentTarget.value = '' }} />
+                    </label>
+                    {rutaPlanoActual && (
+                      <button
+                        type="button"
+                        onClick={() => void manejarEliminarPlano()}
+                        disabled={eliminandoPlano}
+                        className="rounded border border-red-200 px-3 py-2 text-sm text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {eliminandoPlano ? 'Eliminando...' : 'Eliminar plano'}
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
 

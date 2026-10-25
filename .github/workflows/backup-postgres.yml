@@ -20,7 +20,14 @@ jobs:
       - name: Install PostgreSQL and S3 tools
         run: |
           sudo apt-get update
-          sudo apt-get install --yes postgresql-client awscli gnupg
+          sudo apt-get install --yes ca-certificates curl gnupg awscli
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo gpg --dearmor --yes -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg] https://apt.postgresql.org/pub/repos/apt $(. /etc/os-release && echo "$VERSION_CODENAME")-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client-18
 
       - name: Create, verify, encrypt, and upload backup
         shell: bash
@@ -45,9 +52,10 @@ jobs:
           workdir="$(mktemp -d "${RUNNER_TEMP}/postgres-backup.XXXXXX")"
           dump="${workdir}/database.dump"
           restore_list="${workdir}/restore-list.txt"
+          verified_dump="${workdir}/verified.dump"
           encrypted="${workdir}/database.dump.gpg"
           checksum="${workdir}/database.dump.gpg.sha256"
-          trap 'rm -f -- "$dump" "$restore_list" "$encrypted" "$checksum"; rmdir -- "$workdir"' EXIT
+          trap 'rm -f -- "$dump" "$restore_list" "$verified_dump" "$encrypted" "$checksum"; rmdir -- "$workdir"' EXIT
 
           pg_dump --dbname="$SUPABASE_DB_URL" --format=custom --file="$dump"
           pg_restore --list "$dump" > "$restore_list"
@@ -55,6 +63,10 @@ jobs:
             --passphrase-fd 0 \
             --symmetric --cipher-algo AES256 \
             --output "$encrypted" "$dump"
+          printf '%s' "$BACKUP_ENCRYPTION_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback \
+            --passphrase-fd 0 \
+            --decrypt --output "$verified_dump" "$encrypted"
+          pg_restore --list "$verified_dump" > /dev/null
           sha256sum "$encrypted" | awk '{print $1}' > "$checksum"
 
           object_key="postgres/$(date -u +%Y/%m/%d)/inventory-$(date -u +%Y%m%dT%H%M%SZ).dump.gpg"
