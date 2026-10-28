@@ -196,25 +196,25 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6 pb-2">
-      <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#33251d] via-[#432d20] to-[#6b351b] px-6 py-7 text-white shadow-xl shadow-orange-950/10 sm:px-8 sm:py-9">
-        <div aria-hidden="true" className="pointer-events-none absolute -right-12 -top-24 h-72 w-72 rounded-full border-[36px] border-white/[0.045]" />
-        <div aria-hidden="true" className="pointer-events-none absolute -bottom-36 right-44 h-64 w-64 rounded-full border-[28px] border-amber-300/[0.08]" />
+      <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#0f1026] via-[#1a1b3a] to-[#2d2f5f] px-6 py-7 text-white shadow-xl shadow-[#0f1026]/20 sm:px-8 sm:py-9">
+        <div aria-hidden="true" className="pointer-events-none absolute -right-12 -top-24 h-72 w-72 rounded-full border-[36px] border-white/[0.12]" />
+        <div aria-hidden="true" className="pointer-events-none absolute -bottom-36 right-44 h-64 w-64 rounded-full border-[28px] border-white/[0.08]" />
         <div className="relative flex flex-wrap items-end justify-between gap-6">
           <div>
-            <p className="text-xs font-bold uppercase tracking-[0.18em] text-amber-200">Panel de gestión institucional</p>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-white/90">Panel de gestión institucional</p>
             <h1 className="mt-3 text-2xl font-bold tracking-tight sm:text-3xl">Bienvenido, {nombre}</h1>
-            <p className="mt-2 max-w-xl text-sm leading-relaxed text-orange-50/85">
+            <p className="mt-2 max-w-xl text-sm leading-relaxed text-white/95">
               Consulta el estado de los activos tecnológicos y las principales novedades del instituto en un solo lugar.
             </p>
           </div>
-          <div className="flex items-center gap-3 rounded-lg border border-white/15 bg-white/[0.08] px-4 py-3">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-300/15 text-amber-200">
+          <div className="flex items-center gap-3 rounded-lg border border-white/40 bg-white/20 px-4 py-3">
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/30 text-white">
               <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" className="h-5 w-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M7 3v3m10-3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v13H4V6a1 1 0 0 1 1-1Z" />
               </svg>
             </span>
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-orange-100/70">Hoy</p>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-white/80">Hoy</p>
               <p className="mt-0.5 text-sm font-medium capitalize">{fechaInstitucional()}</p>
             </div>
           </div>

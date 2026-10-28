@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { errorPassword, REQUISITOS_PASSWORD } from '../services/passwordPolicy'
 import type { Perfil } from '../hooks/AuthContext'
 import { useAuth } from '../hooks/useAuth'
 import {
@@ -46,6 +47,7 @@ export default function Usuarios() {
   const [guardandoId, setGuardandoId] = useState<string | null>(null)
   const [actualizandoCorreoId, setActualizandoCorreoId] = useState<string | null>(null)
   const [restableciendoId, setRestableciendoId] = useState<string | null>(null)
+  const [passwordInicial, setPasswordInicial] = useState('')
   const [nuevoEmail, setNuevoEmail] = useState('')
   const [nuevosNombres, setNuevosNombres] = useState('')
   const [nuevosApellidos, setNuevosApellidos] = useState('')
@@ -117,10 +119,16 @@ export default function Usuarios() {
       setError('Usa un correo @ottotonsmann.edu.pe o @gmail.com.')
       return
     }
+    const errorClave = errorPassword(passwordInicial)
+    if (errorClave) {
+      setError(errorClave)
+      return
+    }
     setCreando(true)
 
     const nuevo: NuevoUsuario = {
       email,
+      password: passwordInicial,
       nombres: nuevosNombres.trim(),
       apellidos: nuevosApellidos.trim(),
       rol: nuevoRol,
@@ -131,11 +139,12 @@ export default function Usuarios() {
       setUsuarios((prev) =>
         [...prev, perfil].sort((a, b) => a.apellidos.localeCompare(b.apellidos)),
       )
+      setPasswordInicial('')
       setNuevoEmail('')
       setNuevosNombres('')
       setNuevosApellidos('')
       setNuevoRol('consulta')
-      setAviso(`Se envió una invitación a ${perfil.email}.`)
+      setAviso(`Usuario ${perfil.email} creado correctamente.`)
     } catch (e) {
       setError(mensajeError(e, 'No se pudo crear la cuenta.'))
     } finally {
@@ -293,9 +302,7 @@ export default function Usuarios() {
     <section>
       <h2 className="text-2xl font-semibold">Usuarios</h2>
       <p className="mt-1 text-sm text-slate-600">
-        Invita al personal por correo. La persona recibirá un enlace para
-        establecer su contraseña. Se aceptan correos institucionales y Gmail
-        para pruebas.
+        Crea cuentas directamente con rol y contraseña inicial. Se aceptan correos institucionales y Gmail para pruebas.
       </p>
 
       <form
@@ -303,6 +310,7 @@ export default function Usuarios() {
         className="mt-4 rounded-xl bg-white p-4 shadow"
       >
         <h3 className="font-semibold text-slate-900">Agregar usuario</h3>
+        <p className="mt-2 text-sm text-slate-500">{REQUISITOS_PASSWORD}</p>
         <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <input
             type="email"
@@ -334,6 +342,10 @@ export default function Usuarios() {
             aria-label="Apellidos del nuevo usuario"
             className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
           />
+          <input type="password" autoComplete="new-password" required minLength={8}
+            value={passwordInicial} onChange={(event) => setPasswordInicial(event.target.value)}
+            placeholder="Contraseña inicial" aria-label="Contraseña inicial del nuevo usuario"
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
           <select
             value={nuevoRol}
             onChange={(event) => setNuevoRol(event.target.value as Rol)}
@@ -349,7 +361,7 @@ export default function Usuarios() {
             disabled={creando}
             className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
           >
-            {creando ? 'Enviando invitación...' : 'Crear e invitar'}
+            {creando ? 'Creando...' : 'Crear usuario'}
           </button>
         </div>
       </form>

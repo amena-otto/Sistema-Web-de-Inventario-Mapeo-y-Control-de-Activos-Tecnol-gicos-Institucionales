@@ -1,10 +1,10 @@
 import { useState, type FormEvent } from 'react'
-import { Navigate, useLocation } from 'react-router-dom'
+import { Link, Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { supabase } from '../services/supabaseClient'
 
 const RUTA_INICIO = '/dashboard'
-const RUTAS_NO_RETORNO = ['/', '/login', '/restablecer-password']
+const RUTAS_NO_RETORNO = ['/', '/login', '/restablecer-password', '/recuperar-password']
 
 function rutaRetornoSegura(valor: unknown) {
   if (
@@ -143,6 +143,9 @@ export default function Login() {
           >
             {enviando ? 'Iniciando sesión...' : 'Iniciar sesión'}
           </button>
+          <Link to="/recuperar-password" className="block text-center text-sm text-blue-600 hover:underline">
+            ¿Olvidaste tu contraseña?
+          </Link>
         </form>
 
         <p className="mt-6 text-center text-xs text-slate-400">

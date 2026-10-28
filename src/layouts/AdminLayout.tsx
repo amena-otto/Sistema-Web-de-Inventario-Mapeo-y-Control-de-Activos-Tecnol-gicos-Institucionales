@@ -54,7 +54,7 @@ export default function AdminLayout() {
   }
 
   return (
-    <div className="min-h-screen bg-[#f7f5f2] text-slate-800">
+    <div className="min-h-screen bg-white text-slate-800">
       {abierto && (
         <button
           type="button"
@@ -64,7 +64,7 @@ export default function AdminLayout() {
         />
       )}
       <aside
-        className={`fixed inset-y-0 left-0 z-40 flex flex-col bg-[#33251d] text-white shadow-xl transition-all duration-200 md:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-40 flex flex-col bg-[#0f1026] text-white shadow-xl transition-all duration-200 md:translate-x-0 ${
           menuContraido ? 'w-[270px] md:w-20' : 'w-[270px]'
         } ${
           abierto ? 'translate-x-0' : '-translate-x-full'
@@ -72,21 +72,21 @@ export default function AdminLayout() {
       >
         <div className={`border-b border-white/10 px-6 py-6 ${menuContraido ? 'md:px-4' : ''}`}>
           <div className={`flex items-center gap-3 ${menuContraido ? 'md:justify-center' : ''}`}>
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-amber-300/60 bg-white/10 text-lg font-black text-amber-200">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-orange-300/70 bg-white/10 text-lg font-black text-orange-200">
               OT
             </div>
             <div className={menuContraido ? 'md:hidden' : ''}>
-              <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-amber-200">Instituto</p>
+              <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-orange-200">Instituto</p>
               <h1 className="mt-1 text-sm font-bold leading-tight">Otto Tonsmann</h1>
             </div>
           </div>
-          <p className={`mt-5 text-xs leading-relaxed text-blue-100/70 ${menuContraido ? 'md:hidden' : ''}`}>
+          <p className={`mt-5 text-xs leading-relaxed text-white/80 ${menuContraido ? 'md:hidden' : ''}`}>
             Gestión institucional de activos tecnológicos
           </p>
         </div>
 
         <nav aria-label="Navegación principal" className="flex-1 space-y-1 px-3 py-5">
-          <p className={`mb-3 px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-blue-200/60 ${menuContraido ? 'md:hidden' : ''}`}>Menú principal</p>
+          <p className={`mb-3 px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-white/70 ${menuContraido ? 'md:hidden' : ''}`}>Menú principal</p>
           {menuVisible.map((item) => (
             <NavLink
               key={item.to}
@@ -99,8 +99,8 @@ export default function AdminLayout() {
                   menuContraido ? 'px-3 md:justify-center md:px-2' : 'px-3'
                 } ${
                   isActive
-                    ? 'border-amber-300 bg-white/10 font-semibold text-white'
-                    : 'border-transparent text-blue-100/75 hover:bg-white/[0.07] hover:text-white'
+                    ? 'border-orange-300 bg-white/15 font-semibold text-white'
+                    : 'border-transparent text-white/85 hover:bg-white/[0.12] hover:text-white'
                 }`
               }
             >
@@ -112,11 +112,11 @@ export default function AdminLayout() {
           ))}
         </nav>
 
-        <div className={`m-4 rounded-xl border border-white/10 bg-white/[0.06] p-4 ${menuContraido ? 'md:hidden' : ''}`}>
-          <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-amber-200">Control institucional</p>
-          <p className="mt-2 text-xs leading-relaxed text-blue-100/70">Información organizada para una gestión responsable de los recursos.</p>
+        <div className={`m-4 rounded-xl border border-white/15 bg-white/[0.08] p-4 ${menuContraido ? 'md:hidden' : ''}`}>
+          <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-orange-200">Control institucional</p>
+          <p className="mt-2 text-xs leading-relaxed text-white/80">Información organizada para una gestión responsable de los recursos.</p>
         </div>
-        <div className={`border-t border-white/10 px-6 py-4 text-[10px] text-blue-100/50 ${menuContraido ? 'md:hidden' : ''}`}>
+        <div className={`border-t border-white/15 px-6 py-4 text-[10px] text-white/60 ${menuContraido ? 'md:hidden' : ''}`}>
           SISTEMA DE INVENTARIO · OT
         </div>
       </aside>
@@ -147,8 +147,8 @@ export default function AdminLayout() {
                 </svg>
               </button>
               <div className="min-w-0">
-                <p className="truncate text-[10px] font-bold uppercase tracking-[0.18em] text-orange-700">IES Privado Otto Tonsmann</p>
-                <h2 className="mt-0.5 truncate text-lg font-bold text-[#33251d]">{seccionActual}</h2>
+                <p className="truncate text-[10px] font-bold uppercase tracking-[0.18em] text-[#0f1026]">IES Privado Otto Tonsmann</p>
+                <h2 className="mt-0.5 truncate text-lg font-bold text-slate-900">{seccionActual}</h2>
               </div>
             </div>
 
@@ -159,7 +159,7 @@ export default function AdminLayout() {
                 </p>
                 <p className="text-xs text-slate-500">{perfil ? nombreRol[perfil.rol] : ''}</p>
               </div>
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-orange-100 text-sm font-bold text-orange-800 ring-2 ring-white">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-orange-100 text-sm font-bold text-orange-700 ring-2 ring-white">
                 {iniciales}
               </div>
               <button

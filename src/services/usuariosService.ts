@@ -8,6 +8,7 @@ import type { Perfil } from '../hooks/AuthContext'
 export type PerfilUsuario = Perfil & { created_at: string; email: string }
 export type UsuarioCreado = PerfilUsuario & { email: string }
 export type NuevoUsuario = Pick<Perfil, 'nombres' | 'apellidos' | 'rol'> & {
+  password: string
   email: string
 }
 
@@ -17,6 +18,10 @@ export type CambiosPerfil = Partial<
 
 async function errorFuncion(error: Error): Promise<Error> {
   if (!(error instanceof FunctionsHttpError || error instanceof FunctionsRelayError)) {
+    const msg = error.message || ''
+    if (msg.toLowerCase().includes('database error deleting user') || msg.toLowerCase().includes('cannot delete')) {
+      return new Error('No se pudo eliminar la cuenta porque existen conexiones o registros relacionados.')
+    }
     return error
   }
 
@@ -24,12 +29,26 @@ async function errorFuncion(error: Error): Promise<Error> {
     const body: unknown = await error.context.clone().json()
     if (typeof body === 'object' && body !== null) {
       const detalle = 'error' in body ? body.error : 'message' in body ? body.message : null
-      if (typeof detalle === 'string' && detalle) return new Error(detalle)
+      if (typeof detalle === 'string' && detalle) {
+        const d = detalle.toLowerCase()
+        if (d.includes('database error deleting user') || d.includes('cannot delete')) {
+          return new Error('No se pudo eliminar la cuenta porque existen conexiones o registros relacionados.')
+        }
+        return new Error(detalle)
+      }
     }
   } catch {
+    const msg = error.message || ''
+    if (msg.toLowerCase().includes('database error deleting user')) {
+      return new Error('No se pudo eliminar la cuenta porque existen conexiones o registros relacionados.')
+    }
     return new Error(`${error.message} (HTTP ${error.context.status})`)
   }
 
+  const msg = error.message || ''
+  if (msg.toLowerCase().includes('database error deleting user')) {
+    return new Error('No se pudo eliminar la cuenta porque existen conexiones o registros relacionados.')
+  }
   return new Error(`${error.message} (HTTP ${error.context.status})`)
 }
 

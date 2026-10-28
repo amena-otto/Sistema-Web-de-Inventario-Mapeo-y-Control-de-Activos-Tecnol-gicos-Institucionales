@@ -444,9 +444,8 @@ grant execute on function public.actualizar_mantenimiento(
 ) to authenticated;
 
 -- D. Indicadores corregidos ----------------------------------------------------
--- La revisión vencida se evalúa sobre la última intervención de cada equipo
--- activo, sin excluir por el estado de la intervención. Así, una revisión
--- programada al cerrar un mantenimiento sí aparece cuando llega su fecha.
+-- Una revisión vencida es un mantenimiento programado cuya fecha ya pasó y
+-- que continúa pendiente de ejecución. No se contabilizan mantenimientos completados.
 create or replace function public.indicadores_mantenimiento()
 returns table (
   equipos_pendientes bigint,
@@ -482,18 +481,13 @@ begin
       where m.estado = 'en_proceso'
     ),
     (
-      select count(*)
-      from (
-        select distinct on (m.equipo_id)
-          m.equipo_id,
-          m.proxima_revision
-        from public.mantenimientos m
-        join public.equipos e
-          on e.id = m.equipo_id and e.situacion = 'activo'
-        order by m.equipo_id, m.fecha_mantenimiento desc, m.created_at desc
-      ) u
-      where u.proxima_revision is not null
-        and u.proxima_revision <= current_date
+      select count(distinct m.equipo_id)
+      from public.mantenimientos m
+      join public.equipos e
+        on e.id = m.equipo_id and e.situacion = 'activo'
+      where m.proxima_revision is not null
+        and m.proxima_revision <= current_date
+        and m.estado <> 'completado'
     ),
     (
       select count(*)
@@ -511,7 +505,7 @@ revoke all on function public.indicadores_mantenimiento()
 grant execute on function public.indicadores_mantenimiento()
   to authenticated;
 
--- E. Equipos con la revisión vencida según su última intervención ---------------
+-- E. Equipos con la revisión vencida (mantenimientos pendientes con fecha vencida)
 create or replace function public.equipos_revision_vencida()
 returns table (equipo_id uuid)
 language plpgsql
@@ -526,18 +520,13 @@ begin
   end if;
 
   return query
-  select u.equipo_id
-  from (
-    select distinct on (m.equipo_id)
-      m.equipo_id,
-      m.proxima_revision
-    from public.mantenimientos m
-    join public.equipos e
-      on e.id = m.equipo_id and e.situacion = 'activo'
-    order by m.equipo_id, m.fecha_mantenimiento desc, m.created_at desc
-  ) u
-  where u.proxima_revision is not null
-    and u.proxima_revision <= current_date;
+  select distinct m.equipo_id
+  from public.mantenimientos m
+  join public.equipos e
+    on e.id = m.equipo_id and e.situacion = 'activo'
+  where m.proxima_revision is not null
+    and m.proxima_revision <= current_date
+    and m.estado <> 'completado';
 end;
 $$;
 

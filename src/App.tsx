@@ -7,6 +7,7 @@ import Movimientos from './pages/Movimientos'
 import Reportes from './pages/Reportes'
 import Usuarios from './pages/Usuarios'
 import Login from './pages/Login'
+import RecuperarPassword from './pages/RecuperarPassword'
 import RestablecerPassword from './pages/RestablecerPassword'
 import { useAuth } from './hooks/useAuth'
 import { usePermissions, type Permiso } from './hooks/usePermissions'
@@ -74,6 +75,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Navigate to="/login" replace />} />
         <Route path="/login" element={<Login />} />
+        <Route path="/recuperar-password" element={<RecuperarPassword />} />
         <Route
           path="/restablecer-password"
           element={<RestablecerPassword />}

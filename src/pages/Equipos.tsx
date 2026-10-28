@@ -1386,23 +1386,18 @@ export default function Equipos() {
                   <div className="mt-4 space-y-5">
                     <div>
                       <h4 className="font-semibold">Identificación, ubicación y control</h4>
-                      {editando && (
-                        <p className="mt-1 text-xs text-slate-500">
-                          La ubicación, posición y responsable se cambian desde el módulo Movimientos para conservar su historial.
-                        </p>
-                      )}
                       <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                         <label className="text-sm">Ubicación
-                          <select disabled={!!editando} value={datos.ambiente_id ?? ''} onChange={(e) => cambiarDato('ambiente_id', e.target.value || null)} className="mt-1 w-full rounded border border-slate-300 px-3 py-2 disabled:bg-slate-100">
+                          <select disabled={false} value={datos.ambiente_id ?? ''} onChange={(e) => cambiarDato('ambiente_id', e.target.value || null)} className="mt-1 w-full rounded border border-slate-300 px-3 py-2">
                             <option value="">Sin ubicación asignada</option>
                             {ambientes.map((item) => <option key={item.id} value={item.id}>{item.pabellon} / {item.piso} / {item.codigo} — {item.nombre}</option>)}
                           </select>
                         </label>
                         <label className="text-sm">Código / posición en ambiente
-                          <input disabled={!!editando} maxLength={100} value={datos.posicion ?? ''} onChange={(e) => cambiarDato('posicion', e.target.value)} placeholder="Ej. Escritorio 4" className="mt-1 w-full rounded border border-slate-300 px-3 py-2 disabled:bg-slate-100" />
+                          <input maxLength={100} value={datos.posicion ?? ''} onChange={(e) => cambiarDato('posicion', e.target.value)} placeholder="Ej. Escritorio 4" className="mt-1 w-full rounded border border-slate-300 px-3 py-2" />
                         </label>
                         <label className="text-sm">Responsable asignado
-                          <select disabled={!!editando} value={datos.responsable_id ?? ''} onChange={(e) => cambiarDato('responsable_id', e.target.value || null)} className="mt-1 w-full rounded border border-slate-300 px-3 py-2 disabled:bg-slate-100">
+                          <select value={datos.responsable_id ?? ''} onChange={(e) => cambiarDato('responsable_id', e.target.value || null)} className="mt-1 w-full rounded border border-slate-300 px-3 py-2">
                             <option value="">Sin responsable</option>
                             {responsables.map((item) => <option key={item.id} value={item.id}>{item.nombres} {item.apellidos} ({item.rol})</option>)}
                           </select>

@@ -1,6 +1,7 @@
-import { useState, type FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { supabase } from '../services/supabaseClient'
+import { useEffect, useState, type FormEvent } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { errorPassword, REQUISITOS_PASSWORD } from '../services/passwordPolicy'
+import { supabase, usuarioEnRecuperacion } from '../services/supabaseClient'
 
 export default function RestablecerPassword() {
   const navigate = useNavigate()
@@ -11,13 +12,37 @@ export default function RestablecerPassword() {
   const [error, setError] = useState('')
   const [actualizada, setActualizada] = useState(false)
 
+  const [validando, setValidando] = useState(true)
+  const [recuperacionValida, setRecuperacionValida] = useState(false)
+
+  useEffect(() => {
+    let vigente = true
+    async function validar() {
+      try {
+        const { data, error } = await supabase.auth.getUser()
+        if (vigente) setRecuperacionValida(!error && !!data.user && data.user.id === usuarioEnRecuperacion())
+      } catch {
+        if (vigente) setRecuperacionValida(false)
+      } finally {
+        if (vigente) setValidando(false)
+      }
+    }
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
+      // Las llamadas Auth se realizan fuera del callback para evitar bloqueos del SDK.
+      window.setTimeout(() => { if (vigente) void validar() }, 0)
+    })
+    void validar()
+    return () => { vigente = false; subscription.unsubscribe() }
+  }, [])
+
   async function cambiarContrasena(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setError('')
     setMensaje('')
 
-    if (contrasena.length < 8) {
-      setError('La contraseña debe tener al menos 8 caracteres.')
+    const errorClave = errorPassword(contrasena)
+    if (errorClave) {
+      setError(errorClave)
       return
     }
 
@@ -29,9 +54,9 @@ export default function RestablecerPassword() {
     setProcesando(true)
 
     try {
-      const { data, error: sesionError } = await supabase.auth.getSession()
+      const { data, error: sesionError } = await supabase.auth.getUser()
 
-      if (sesionError || !data.session) {
+      if (!recuperacionValida || sesionError || !data.user || data.user.id !== usuarioEnRecuperacion()) {
         setError(
           'El enlace de recuperación no tiene una sesión válida. Solicita un nuevo enlace e inténtalo otra vez.'
         )
@@ -49,11 +74,26 @@ export default function RestablecerPassword() {
 
       setActualizada(true)
       setMensaje('Tu contraseña se actualizó correctamente.')
+      await supabase.auth.signOut({ scope: 'local' })
     } catch {
       setError('No se pudo actualizar la contraseña. Inténtalo nuevamente.')
     } finally {
       setProcesando(false)
     }
+  }
+
+  if (!actualizada && (validando || !recuperacionValida)) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-slate-100 p-4">
+        <section className="w-full max-w-md rounded-2xl bg-white p-8 shadow-lg">
+          <h1 className="text-2xl font-bold text-slate-900">Restablecer contraseña</h1>
+          <p role="status" className="mt-4 text-sm text-slate-600">
+            {validando ? 'Verificando enlace...' : 'El enlace es inválido, expiró o ya fue utilizado. Solicita uno nuevo. Si recargaste esta pantalla, abre un nuevo enlace de recuperación.'}
+          </p>
+          {!validando && <Link to="/recuperar-password" className="mt-6 block text-blue-600 hover:underline">Solicitar nuevo enlace</Link>}
+        </section>
+      </main>
+    )
   }
 
   if (actualizada) {
@@ -83,6 +123,7 @@ export default function RestablecerPassword() {
         </h1>
         <p className="mt-2 mb-6 text-sm text-slate-500">
           Introduce una contraseña nueva para tu cuenta institucional.
+          {' '}{REQUISITOS_PASSWORD}
         </p>
 
         <form onSubmit={cambiarContrasena} className="space-y-4">

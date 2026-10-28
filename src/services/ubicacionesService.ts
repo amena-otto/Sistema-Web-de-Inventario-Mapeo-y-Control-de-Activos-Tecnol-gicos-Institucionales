@@ -161,6 +161,7 @@ export async function listarEquiposPiso(pisoId: string): Promise<EquipoUbicacion
       'id, codigo_institucional, nombre, marca, modelo, numero_serie, estado_operativo, situacion, ambiente_id, categorias_equipos(nombre), ambientes!inner(piso_id), marcadores_mapa(x, y)',
     )
     .eq('ambientes.piso_id', pisoId)
+    .eq('situacion', 'activo')
     .order('codigo_institucional')
   if (error) throw error
 
@@ -198,6 +199,26 @@ export async function guardarMarcador(
     { equipo_id: equipoId, piso_id: pisoId, x, y },
     { onConflict: 'equipo_id' },
   )
+  if (error) throw error
+}
+
+export async function eliminarMarcador(equipoId: string) {
+  const { error } = await supabase
+    .from('marcadores_mapa')
+    .delete()
+    .eq('equipo_id', equipoId)
+  if (error) throw error
+}
+
+export async function actualizarMarcadorPosicion(
+  equipoId: string,
+  x: number,
+  y: number,
+) {
+  const { error } = await supabase
+    .from('marcadores_mapa')
+    .update({ x, y })
+    .eq('equipo_id', equipoId)
   if (error) throw error
 }
 

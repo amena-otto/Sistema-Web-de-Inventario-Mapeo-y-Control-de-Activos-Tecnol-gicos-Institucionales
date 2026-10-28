@@ -3,7 +3,9 @@ import { Link } from 'react-router-dom'
 import { usePermissions } from '../hooks/usePermissions'
 import { supabase } from '../services/supabaseClient'
 import {
+  actualizarMarcadorPosicion,
   eliminarAmbiente,
+  eliminarMarcador,
   eliminarPabellon,
   eliminarPiso,
   eliminarPlano,
@@ -22,6 +24,8 @@ import {
   type Pabellon,
   type Piso,
 } from '../services/ubicacionesService'
+import { actualizarEquipo, cargarCatalogos } from '../services/equiposService'
+import { registrarMovimiento } from '../services/movimientosService'
 
 type TipoFormulario = 'pabellon' | 'piso' | 'ambiente'
 
@@ -51,6 +55,10 @@ export default function Ubicaciones() {
   const [planoUrl, setPlanoUrl] = useState('')
   const [eliminandoPlano, setEliminandoPlano] = useState(false)
   const [equipoParaMarcar, setEquipoParaMarcar] = useState('')
+  const [modoMoverMarcador, setModoMoverMarcador] = useState(false)
+  const [marcadorAMover, setMarcadorAMover] = useState<string | null>(null)
+  const [catalogoAmbientes, setCatalogoAmbientes] = useState<any[]>([])
+  const [cambioUbicacion, setCambioUbicacion] = useState<any>({ abierto: false, equipoId: '', pabellonId: '', pisoId: '', ambienteId: '', guardando: false })
   const [ficha, setFicha] = useState<EquipoUbicacion | null>(null)
   const [formulario, setFormulario] = useState<TipoFormulario | null>(null)
   const [editandoId, setEditandoId] = useState<string | null>(null)
@@ -144,9 +152,14 @@ export default function Ubicaciones() {
     if (!pisoIdActual) return
 
     let vigente = true
-    listarEquiposPiso(pisoIdActual)
-      .then((datos) => {
-        if (vigente) setEquipos(datos)
+    Promise.all([
+      listarEquiposPiso(pisoIdActual),
+      cargarCatalogos().catch(() => null),
+    ])
+      .then(([datos, catalogos]) => {
+        if (!vigente) return
+        setEquipos(datos)
+        if (catalogos?.ambientes) setCatalogoAmbientes(catalogos.ambientes)
       })
       .catch((e: unknown) => {
         if (vigente) setError(mostrarError(e, 'No se pudieron cargar los equipos del piso.'))
@@ -348,18 +361,33 @@ export default function Ubicaciones() {
   }
 
   async function colocarMarcador(event: MouseEvent<HTMLImageElement>) {
-    if (!pisoActual || !equipoParaMarcar) return
+    if (!pisoActual) return
     const rect = event.currentTarget.getBoundingClientRect()
+    setError('')
+    if (modoMoverMarcador && marcadorAMover) {
+      const x = Number((((event.clientX - rect.left) / rect.width) * 100).toFixed(3))
+      const y = Number((((event.clientY - rect.top) / rect.height) * 100).toFixed(3))
+      try {
+        await actualizarMarcadorPosicion(marcadorAMover, x, y)
+        setModoMoverMarcador(false)
+        setMarcadorAMover(null)
+        setFicha(null)
+        setRecarga((actual) => actual + 1)
+      } catch (e) {
+        setError(mostrarError(e, 'No se pudo mover el marcador.'))
+      }
+      return
+    }
+    if (!equipoParaMarcar) return
     const x = Number((((event.clientX - rect.left) / rect.width) * 100).toFixed(3))
     const y = Number((((event.clientY - rect.top) / rect.height) * 100).toFixed(3))
-    setError('')
     try {
       await guardarMarcador(equipoParaMarcar, pisoActual.id, x, y)
       setEquipoParaMarcar('')
       setAviso('Marcador guardado en el plano.')
       setRecarga((actual) => actual + 1)
-    } catch (e) {
-      setError(mostrarError(e, 'No se pudo guardar el marcador.'))
+    } catch (e: any) {
+      setError(e?.message || mostrarError(e, 'No se pudo guardar el marcador.'))
     }
   }
 
@@ -483,14 +511,14 @@ export default function Ubicaciones() {
                   {puedeEditarEquipo && (
                     <div className="mt-3 flex flex-wrap items-center gap-2">
                       <label htmlFor="equipo-marcador" className="text-sm">Equipo para ubicar</label>
-                      <select id="equipo-marcador" value={equipoParaMarcar} onChange={(event) => setEquipoParaMarcar(event.target.value)} className="min-w-64 rounded border border-slate-300 px-3 py-2 text-sm">
+                      <select id="equipo-marcador" value={equipoParaMarcar} onChange={(event) => { setEquipoParaMarcar(event.target.value); setModoMoverMarcador(false); setMarcadorAMover(null); }} className="min-w-64 rounded border border-slate-300 px-3 py-2 text-sm">
                         <option value="">Selecciona un equipo</option>
                         {equipos.map((equipo) => <option key={equipo.id} value={equipo.id}>{equipo.codigo_institucional} — {equipo.nombre}{equipo.marcador ? ' (reubicar)' : ''}</option>)}
                       </select>
                     </div>
                   )}
-                  <div className={`relative mt-3 inline-block max-w-full ${equipoParaMarcar ? 'cursor-crosshair' : ''}`}>
-                    <img src={planoUrl} alt={`Plano del ${pabellonActual?.nombre}, ${pisoActual.nombre}`} onClick={(event) => { if (equipoParaMarcar) void colocarMarcador(event) }} className="block max-h-[70vh] max-w-full rounded-lg border border-slate-200 object-contain" />
+                  <div className={`relative mt-3 inline-block max-w-full ${equipoParaMarcar || modoMoverMarcador || marcadorAMover ? 'cursor-crosshair' : ''}`}>
+                    <img src={planoUrl} alt={`Plano del ${pabellonActual?.nombre}, ${pisoActual.nombre}`} onClick={(event) => { if (equipoParaMarcar || modoMoverMarcador || marcadorAMover) void colocarMarcador(event) }} className="block max-h-[70vh] max-w-full rounded-lg border border-slate-200 object-contain" />
                     {equipos.filter((item) => item.situacion === 'activo' && item.marcador).map((equipo) => (
                       <button key={equipo.id} type="button" title={`${equipo.codigo_institucional} — ${equipo.nombre}`} onClick={(event) => { event.stopPropagation(); setFicha(equipo) }} style={{ left: `${equipo.marcador?.x}%`, top: `${equipo.marcador?.y}%` }} className="absolute flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-white bg-blue-700 text-xs font-bold text-white shadow-lg hover:scale-110">
                         {equipo.codigo_institucional.slice(-2)}
@@ -498,6 +526,8 @@ export default function Ubicaciones() {
                     ))}
                   </div>
                   {equipoParaMarcar && <p className="mt-2 text-sm text-blue-700">Haz clic en el punto del plano donde se encuentra el equipo.</p>}
+                  {(modoMoverMarcador || marcadorAMover) && <p className="mt-2 text-sm text-blue-700">Haz clic en el nuevo punto del plano para reubicar el marcador.</p>}
+                  {modoMoverMarcador && <p className="mt-2 text-sm text-blue-700">Haz clic en el nuevo punto del plano para reubicar el marcador.</p>}
                   <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-500">
                     <span>{equipos.filter((item) => item.marcador && item.situacion === 'activo').length} marcadores visibles</span>
                     <span>{equiposMismoPisoSinMarcador.length} equipos pendientes de ubicar</span>
@@ -621,11 +651,68 @@ export default function Ubicaciones() {
               <div><dt className="text-slate-500">Número de serie</dt><dd>{ficha.numero_serie ?? '—'}</dd></div>
               <div><dt className="text-slate-500">Ambiente</dt><dd>{ambientes.find((item) => item.id === ficha.ambiente_id)?.nombre ?? '—'}</dd></div>
             </dl>
-            <div className="mt-5 flex justify-end gap-2">
+            <div className="mt-5 flex flex-wrap justify-end gap-2">
+              {ficha.marcador && (
+                <>
+                  <button type="button" onClick={() => { setModoMoverMarcador(true); setMarcadorAMover(ficha.id); setFicha(null); setError(''); }} className="rounded border border-slate-300 px-3 py-2 text-sm">Reubicar marcador</button>
+                  <button type="button" onClick={async () => { if (!confirm('¿Quitar marcador de este equipo? Se conservará en inventario.')) return; try { await eliminarMarcador(ficha.id); setFicha(null); if (pisoElegido) { const datos = await listarEquiposPiso(pisoElegido); setEquipos(datos); } } catch (e) { setError(mostrarError(e, 'No se pudo quitar el marcador.')); } }} className="rounded border border-red-200 px-3 py-2 text-sm text-red-700 hover:bg-red-50">Quitar marcador</button>
+                  <button type="button" onClick={() => { setCambioUbicacion({ abierto: true, equipoId: ficha.id, pabellonId: pabellonActual?.id ?? '', pisoId: pisoActual?.id ?? '', ambienteId: ficha.ambiente_id ?? '', guardando: false }); setFicha(null); }} className="rounded border border-blue-200 px-3 py-2 text-sm text-blue-700 hover:bg-blue-50">Cambiar ubicación</button>
+                </>
+              )}
               <Link to={`/equipos?equipo=${encodeURIComponent(ficha.id)}`} className="rounded bg-blue-600 px-4 py-2 text-sm font-semibold text-white">Abrir ficha completa</Link>
               <button type="button" onClick={() => setFicha(null)} className="rounded border border-slate-300 px-4 py-2 text-sm">Cerrar</button>
             </div>
           </section>
+        </div>
+      )}
+
+      {cambioUbicacion.abierto && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
+          <div className="w-full max-w-lg rounded-xl bg-white p-5 shadow-xl">
+            <h3 className="text-lg font-semibold">Cambiar ubicación del equipo</h3>
+            <p className="mt-1 text-sm text-slate-600">Selecciona nuevo pabellón, piso y ambiente. Se registrará el movimiento.</p>
+            <div className="mt-4 space-y-3">
+              <label className="block text-sm">Pabellón
+                <select className="mt-1 w-full rounded border border-slate-300 px-3 py-2" value={cambioUbicacion.pabellonId} onChange={(e) => {
+                  const pabId = e.target.value
+                  setCambioUbicacion((a: any) => ({ ...a, pabellonId: pabId, pisoId: '', ambienteId: '' }))
+                }}>
+                  <option value="">Selecciona</option>
+                  {pabellones.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+                </select>
+              </label>
+              <label className="block text-sm">Piso
+                <select className="mt-1 w-full rounded border border-slate-300 px-3 py-2" disabled={!cambioUbicacion.pabellonId} value={cambioUbicacion.pisoId} onChange={(e) => {
+                  const pisoId = e.target.value
+                  setCambioUbicacion((a: any) => ({ ...a, pisoId, ambienteId: '' }))
+                }}>
+                  <option value="">Selecciona</option>
+                  {pisos.filter((p) => p.pabellon_id === cambioUbicacion.pabellonId).map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+                </select>
+              </label>
+              <label className="block text-sm">Ambiente
+                <select className="mt-1 w-full rounded border border-slate-300 px-3 py-2" disabled={!cambioUbicacion.pisoId} value={cambioUbicacion.ambienteId} onChange={(e) => setCambioUbicacion((a: any) => ({ ...a, ambienteId: e.target.value }))}>
+                  <option value="">Selecciona</option>
+                  {catalogoAmbientes.filter((a: any) => a.piso_id === cambioUbicacion.pisoId).map((a: any) => <option key={a.id} value={a.id}>{a.codigo} — {a.nombre}</option>)}
+                </select>
+              </label>
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" disabled={cambioUbicacion.guardando} onClick={() => setCambioUbicacion({ abierto: false, equipoId: '', pabellonId: '', pisoId: '', ambienteId: '', guardando: false })} className="rounded border border-slate-300 px-4 py-2 text-sm">Cancelar</button>
+              <button type="button" disabled={cambioUbicacion.guardando || !cambioUbicacion.ambienteId} onClick={async () => {
+                setCambioUbicacion((a: any) => ({ ...a, guardando: true }))
+                try {
+                  await actualizarEquipo(cambioUbicacion.equipoId, { ambiente_id: cambioUbicacion.ambienteId } as any)
+                  try { await registrarMovimiento({ equipo_id: cambioUbicacion.equipoId, tipo_movimiento: 'traslado', ambiente_destino_id: cambioUbicacion.ambienteId, observaciones: 'Traslado desde mapa/ubicaciones' } as any) } catch {}
+                  setCambioUbicacion({ abierto: false, equipoId: '', pabellonId: '', pisoId: '', ambienteId: '', guardando: false })
+                  if (pisoElegido) { const datos = await listarEquiposPiso(pisoElegido); setEquipos(datos); }
+                } catch (e) {
+                  setError(mostrarError(e, 'No se pudo cambiar la ubicación.'))
+                  setCambioUbicacion((a: any) => ({ ...a, guardando: false }))
+                }
+              }} className="rounded bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">{cambioUbicacion.guardando ? 'Guardando...' : 'Confirmar traslado'}</button>
+            </div>
+          </div>
         </div>
       )}
 

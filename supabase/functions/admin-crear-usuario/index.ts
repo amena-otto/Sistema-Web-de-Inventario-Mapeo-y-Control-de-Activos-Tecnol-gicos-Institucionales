@@ -52,6 +52,7 @@ Deno.serve(async (request: Request) => {
   const email = typeof entrada.email === 'string' ? entrada.email.trim().toLowerCase() : ''
   const nombres = typeof entrada.nombres === 'string' ? entrada.nombres.trim() : ''
   const apellidos = typeof entrada.apellidos === 'string' ? entrada.apellidos.trim() : ''
+  const password = typeof entrada.password === 'string' ? entrada.password : ''
   const rol = entrada.rol
 
   if (
@@ -63,10 +64,14 @@ Deno.serve(async (request: Request) => {
     nombres.length > 100 ||
     apellidos.length < 1 ||
     apellidos.length > 100 ||
+    password.length < 8 ||
+    !/[a-z]/.test(password) ||
+    !/[A-Z]/.test(password) ||
+    !/[0-9]/.test(password) ||
     !esRol(rol)
   ) {
     return respuesta(
-      { error: 'Usa un correo @ottotonsmann.edu.pe o @gmail.com y revisa nombres, apellidos y rol.' },
+      { error: 'Usa un correo @ottotonsmann.edu.pe o @gmail.com y revisa nombres, apellidos y rol. La contraseña requiere 8 caracteres, mayúscula, minúscula y número.' },
       400,
     )
   }
@@ -74,11 +79,10 @@ Deno.serve(async (request: Request) => {
   const supabaseUrl = Deno.env.get('SUPABASE_URL')
   const anonKey = Deno.env.get('SUPABASE_ANON_KEY')
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
-  const appUrl = Deno.env.get('APP_URL')?.replace(/\/+$/, '')
 
-  if (!supabaseUrl || !anonKey || !serviceRoleKey || !appUrl) {
-    console.error('Falta configurar SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY o APP_URL.')
-    return respuesta({ error: 'El servicio de invitaciones no está configurado.' }, 500)
+  if (!supabaseUrl || !anonKey || !serviceRoleKey) {
+    console.error('Falta configurar SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY.')
+    return respuesta({ error: 'El servicio de creación de usuarios no está configurado.' }, 500)
   }
 
   const authClient = createClient(supabaseUrl, anonKey, {
@@ -106,42 +110,27 @@ Deno.serve(async (request: Request) => {
   }
 
   if (perfilAdmin?.rol !== 'admin' || perfilAdmin.activo !== true) {
-    return respuesta({ error: 'Solo un administrador activo puede invitar usuarios.' }, 403)
+    return respuesta({ error: 'Solo un administrador activo puede crear usuarios.' }, 403)
   }
 
-  const { data: invitation, error: invitationError } =
-    await adminClient.auth.admin.inviteUserByEmail(email, {
-      data: { nombres, apellidos },
-      redirectTo: `${appUrl}/restablecer-password`,
-    })
-
-  if (invitationError || !invitation.user) {
-    console.error('No se pudo enviar la invitación:', invitationError?.message)
-    if (invitationError?.message.toLowerCase().includes('email rate limit exceeded')) {
-      return respuesta(
-        {
-          error:
-            'Supabase alcanzó el límite de envío de invitaciones por correo. Espera antes de volver a intentarlo o configura un proveedor SMTP propio en Authentication → SMTP Settings.',
-        },
-        429,
-      )
-    }
-    return respuesta(
-      { error: invitationError?.message ?? 'No se pudo crear la cuenta.' },
-      400,
-    )
+  // La clave administrativa solo se usa en el backend. Auth rechaza duplicados.
+  const { data: cuenta, error: cuentaError } = await adminClient.auth.admin.createUser({
+    email, password, email_confirm: true, user_metadata: { nombres, apellidos },
+  })
+  if (cuentaError || !cuenta.user) {
+    return respuesta({ error: cuentaError?.message ?? 'No se pudo crear la cuenta.' }, 400)
   }
 
   const { data: perfilCreado, error: actualizacionError } = await adminClient
     .from('profiles')
     .update({ nombres, apellidos, rol, activo: true })
-    .eq('id', invitation.user.id)
+    .eq('id', cuenta.user.id)
     .select('id, nombres, apellidos, rol, activo, created_at')
     .maybeSingle()
 
   if (actualizacionError || !perfilCreado) {
     const { error: eliminacionError } = await adminClient.auth.admin.deleteUser(
-      invitation.user.id,
+      cuenta.user.id,
     )
 
     if (eliminacionError) {
@@ -152,7 +141,7 @@ Deno.serve(async (request: Request) => {
       )
     }
 
-    console.error('No se pudo asignar el perfil a la cuenta invitada:', actualizacionError?.message)
+    console.error('No se pudo asignar el perfil a la cuenta creada:', actualizacionError?.message)
     return respuesta({ error: 'No se pudo asignar el perfil. La cuenta creada fue cancelada.' }, 500)
   }
 

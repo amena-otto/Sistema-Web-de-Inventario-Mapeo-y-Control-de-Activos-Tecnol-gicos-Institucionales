@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { usePermissions } from '../hooks/usePermissions'
+import SearchableSelect from '../components/SearchableSelect'
 import {
   etiquetaUbicacion,
   listarAmbientesMovimiento,
@@ -62,6 +63,10 @@ export default function Movimientos() {
   const [aviso, setAviso] = useState('')
   const [modalAbierto, setModalAbierto] = useState(false)
   const [actualizacion, setActualizacion] = useState(0)
+  const [busqueda, setBusqueda] = useState('')
+  // @ts-ignore
+  void setBusqueda
+  void busqueda
   const [filtros, setFiltros] = useState<FiltrosMovimiento>({
     equipoId: '',
     desde: '',
@@ -110,26 +115,30 @@ export default function Movimientos() {
 
   useEffect(() => {
     let vigente = true
-    listarHistorialMovimientos(filtros)
-      .then((resultado) => {
-        if (!vigente) return
-        setMovimientos(resultado.movimientos)
-        setTotal(resultado.total)
-      })
-      .catch((e: unknown) => {
-        if (vigente) {
+    setCargando(true)
+    const timeout = setTimeout(() => {
+      listarHistorialMovimientos({ ...(filtros as any), busqueda } as any)
+        .then((resultado: any) => {
+          if (!vigente) return
+          setMovimientos(resultado.movimientos)
+          setTotal(resultado.total)
+        })
+        .catch((e: unknown) => {
+          if (vigente) {
           setError(
             `${mostrarError(e, 'No se pudo cargar el historial de movimientos.')}. Verifica que hayas ejecutado la migración 010 en Supabase.`,
           )
         }
       })
-      .finally(() => {
-        if (vigente) setCargando(false)
-      })
+        .finally(() => {
+          if (vigente) setCargando(false)
+        })
+    }, 300)
     return () => {
       vigente = false
+      clearTimeout(timeout)
     }
-  }, [filtros, actualizacion])
+  }, [filtros, actualizacion, busqueda])
 
   function cambiarFiltro(cambios: Partial<FiltrosMovimiento>) {
     setError('')
@@ -282,22 +291,35 @@ export default function Movimientos() {
           </button>
         </div>
 
-        <div className="mb-5 grid gap-3 sm:grid-cols-3">
+        <div className="mb-5 grid gap-3 sm:grid-cols-4">
           <label className="text-sm text-slate-700">
-            Equipo
-            <select
-              value={filtros.equipoId}
-              onChange={(event) => cambiarFiltro({ equipoId: event.target.value })}
-              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2"
-            >
-              <option value="">Todos los equipos</option>
-              {equiposHistorial.map((equipo) => (
-                <option key={equipo.id} value={equipo.id}>
-                  {equipo.codigo_institucional} — {equipo.nombre}
-                </option>
-              ))}
-            </select>
+            <span className="mb-1 block">Buscar</span>
+            <input
+              type="search"
+              value={busqueda}
+              onChange={(event) => {
+                setError('')
+                setCargando(true)
+                setFiltros((actual) => ({ ...actual, pagina: 1 }))
+                setBusqueda(event.target.value)
+              }}
+              placeholder="Código, equipo, origen/destino, motivo..."
+              className="w-full rounded-lg border border-slate-300 px-3 py-2"
+            />
           </label>
+          <div className="text-sm text-slate-700">
+            <SearchableSelect
+              label="Equipo"
+              placeholder="Todos los equipos"
+              value={filtros.equipoId}
+              onChange={(value) => cambiarFiltro({ equipoId: value })}
+              options={equiposHistorial.map((equipo) => ({
+                value: equipo.id,
+                label: `${equipo.codigo_institucional} — ${equipo.nombre}`,
+                keywords: `${equipo.codigo_institucional} ${equipo.nombre}`,
+              }))}
+            />
+          </div>
           <label className="text-sm text-slate-700">
             Desde
             <input
