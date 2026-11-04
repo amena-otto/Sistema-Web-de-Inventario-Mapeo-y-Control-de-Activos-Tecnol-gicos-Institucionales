@@ -17,10 +17,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Install PostgreSQL and S3 tools
+      - name: Install PostgreSQL and encryption tools
         run: |
           sudo apt-get update
-          sudo apt-get install --yes ca-certificates curl gnupg awscli
+          sudo apt-get install --yes ca-certificates curl gnupg unzip
           sudo install -d /usr/share/postgresql-common/pgdg
           curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
             | sudo gpg --dearmor --yes -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg
@@ -28,6 +28,16 @@ jobs:
             | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
           sudo apt-get update
           sudo apt-get install --yes postgresql-client-18
+
+      - name: Install AWS CLI v2
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o "${RUNNER_TEMP}/awscliv2.zip"
+          unzip -q "${RUNNER_TEMP}/awscliv2.zip" -d "${RUNNER_TEMP}/awscli"
+          "${RUNNER_TEMP}/awscli/aws/install" --install-dir "${RUNNER_TEMP}/aws-cli" --bin-dir "${RUNNER_TEMP}/aws-bin"
+          echo "${RUNNER_TEMP}/aws-bin" >> "$GITHUB_PATH"
+          "${RUNNER_TEMP}/aws-bin/aws" --version
 
       - name: Create, verify, encrypt, and upload backup
         shell: bash

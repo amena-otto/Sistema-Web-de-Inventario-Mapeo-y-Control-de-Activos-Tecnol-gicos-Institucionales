@@ -24,8 +24,7 @@ import {
   type Pabellon,
   type Piso,
 } from '../services/ubicacionesService'
-import { actualizarEquipo, cargarCatalogos } from '../services/equiposService'
-import { registrarMovimiento } from '../services/movimientosService'
+import { actualizarEquipo, cargarCatalogos, type Ambiente } from '../services/equiposService'
 
 type TipoFormulario = 'pabellon' | 'piso' | 'ambiente'
 
@@ -57,8 +56,8 @@ export default function Ubicaciones() {
   const [equipoParaMarcar, setEquipoParaMarcar] = useState('')
   const [modoMoverMarcador, setModoMoverMarcador] = useState(false)
   const [marcadorAMover, setMarcadorAMover] = useState<string | null>(null)
-  const [catalogoAmbientes, setCatalogoAmbientes] = useState<any[]>([])
-  const [cambioUbicacion, setCambioUbicacion] = useState<any>({ abierto: false, equipoId: '', pabellonId: '', pisoId: '', ambienteId: '', guardando: false })
+  const [catalogoAmbientes, setCatalogoAmbientes] = useState<Ambiente[]>([])
+  const [cambioUbicacion, setCambioUbicacion] = useState({ abierto: false, equipoId: '', pabellonId: '', pisoId: '', ambienteId: '', guardando: false })
   const [ficha, setFicha] = useState<EquipoUbicacion | null>(null)
   const [formulario, setFormulario] = useState<TipoFormulario | null>(null)
   const [editandoId, setEditandoId] = useState<string | null>(null)
@@ -386,8 +385,12 @@ export default function Ubicaciones() {
       setEquipoParaMarcar('')
       setAviso('Marcador guardado en el plano.')
       setRecarga((actual) => actual + 1)
-    } catch (e: any) {
-      setError(e?.message || mostrarError(e, 'No se pudo guardar el marcador.'))
+    } catch (e: unknown) {
+      setError(
+        typeof e === 'object' && e !== null && 'message' in e && typeof e.message === 'string' && e.message
+          ? e.message
+          : mostrarError(e, 'No se pudo guardar el marcador.'),
+      )
     }
   }
 
@@ -675,7 +678,7 @@ export default function Ubicaciones() {
               <label className="block text-sm">Pabellón
                 <select className="mt-1 w-full rounded border border-slate-300 px-3 py-2" value={cambioUbicacion.pabellonId} onChange={(e) => {
                   const pabId = e.target.value
-                  setCambioUbicacion((a: any) => ({ ...a, pabellonId: pabId, pisoId: '', ambienteId: '' }))
+                  setCambioUbicacion((a) => ({ ...a, pabellonId: pabId, pisoId: '', ambienteId: '' }))
                 }}>
                   <option value="">Selecciona</option>
                   {pabellones.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
@@ -684,31 +687,30 @@ export default function Ubicaciones() {
               <label className="block text-sm">Piso
                 <select className="mt-1 w-full rounded border border-slate-300 px-3 py-2" disabled={!cambioUbicacion.pabellonId} value={cambioUbicacion.pisoId} onChange={(e) => {
                   const pisoId = e.target.value
-                  setCambioUbicacion((a: any) => ({ ...a, pisoId, ambienteId: '' }))
+                  setCambioUbicacion((a) => ({ ...a, pisoId, ambienteId: '' }))
                 }}>
                   <option value="">Selecciona</option>
                   {pisos.filter((p) => p.pabellon_id === cambioUbicacion.pabellonId).map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
                 </select>
               </label>
               <label className="block text-sm">Ambiente
-                <select className="mt-1 w-full rounded border border-slate-300 px-3 py-2" disabled={!cambioUbicacion.pisoId} value={cambioUbicacion.ambienteId} onChange={(e) => setCambioUbicacion((a: any) => ({ ...a, ambienteId: e.target.value }))}>
+                <select className="mt-1 w-full rounded border border-slate-300 px-3 py-2" disabled={!cambioUbicacion.pisoId} value={cambioUbicacion.ambienteId} onChange={(e) => setCambioUbicacion((a) => ({ ...a, ambienteId: e.target.value }))}>
                   <option value="">Selecciona</option>
-                  {catalogoAmbientes.filter((a: any) => a.piso_id === cambioUbicacion.pisoId).map((a: any) => <option key={a.id} value={a.id}>{a.codigo} — {a.nombre}</option>)}
+                  {catalogoAmbientes.filter((a) => a.piso_id === cambioUbicacion.pisoId).map((a) => <option key={a.id} value={a.id}>{a.codigo} — {a.nombre}</option>)}
                 </select>
               </label>
             </div>
             <div className="mt-5 flex justify-end gap-2">
               <button type="button" disabled={cambioUbicacion.guardando} onClick={() => setCambioUbicacion({ abierto: false, equipoId: '', pabellonId: '', pisoId: '', ambienteId: '', guardando: false })} className="rounded border border-slate-300 px-4 py-2 text-sm">Cancelar</button>
               <button type="button" disabled={cambioUbicacion.guardando || !cambioUbicacion.ambienteId} onClick={async () => {
-                setCambioUbicacion((a: any) => ({ ...a, guardando: true }))
+                setCambioUbicacion((a) => ({ ...a, guardando: true }))
                 try {
-                  await actualizarEquipo(cambioUbicacion.equipoId, { ambiente_id: cambioUbicacion.ambienteId } as any)
-                  try { await registrarMovimiento({ equipo_id: cambioUbicacion.equipoId, tipo_movimiento: 'traslado', ambiente_destino_id: cambioUbicacion.ambienteId, observaciones: 'Traslado desde mapa/ubicaciones' } as any) } catch {}
+                  await actualizarEquipo(cambioUbicacion.equipoId, { ambiente_id: cambioUbicacion.ambienteId })
                   setCambioUbicacion({ abierto: false, equipoId: '', pabellonId: '', pisoId: '', ambienteId: '', guardando: false })
                   if (pisoElegido) { const datos = await listarEquiposPiso(pisoElegido); setEquipos(datos); }
                 } catch (e) {
                   setError(mostrarError(e, 'No se pudo cambiar la ubicación.'))
-                  setCambioUbicacion((a: any) => ({ ...a, guardando: false }))
+                  setCambioUbicacion((a) => ({ ...a, guardando: false }))
                 }
               }} className="rounded bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">{cambioUbicacion.guardando ? 'Guardando...' : 'Confirmar traslado'}</button>
             </div>

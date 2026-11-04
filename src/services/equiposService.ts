@@ -350,7 +350,7 @@ export async function crearEquipo(datos: DatosEquipo): Promise<Equipo> {
 
 export async function actualizarEquipo(
   id: string,
-  datos: DatosEquipo,
+  datos: Partial<DatosEquipo>,
 ): Promise<Equipo> {
   const { data, error } = await supabase
     .from('equipos')
