@@ -64,9 +64,6 @@ export default function Movimientos() {
   const [modalAbierto, setModalAbierto] = useState(false)
   const [actualizacion, setActualizacion] = useState(0)
   const [busqueda, setBusqueda] = useState('')
-  // @ts-ignore
-  void setBusqueda
-  void busqueda
   const [filtros, setFiltros] = useState<FiltrosMovimiento>({
     equipoId: '',
     desde: '',
@@ -115,10 +112,9 @@ export default function Movimientos() {
 
   useEffect(() => {
     let vigente = true
-    setCargando(true)
     const timeout = setTimeout(() => {
-      listarHistorialMovimientos({ ...(filtros as any), busqueda } as any)
-        .then((resultado: any) => {
+      listarHistorialMovimientos(filtros)
+        .then((resultado) => {
           if (!vigente) return
           setMovimientos(resultado.movimientos)
           setTotal(resultado.total)
