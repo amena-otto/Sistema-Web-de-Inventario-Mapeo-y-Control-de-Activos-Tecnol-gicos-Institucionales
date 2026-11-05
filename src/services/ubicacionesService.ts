@@ -156,13 +156,13 @@ export async function eliminarAmbiente(id: string) {
 
 export async function listarEquiposPiso(pisoId: string): Promise<EquipoUbicacion[]> {
   const { data, error } = await supabase
-    .from('equipos')
-    .select(
-      'id, codigo_institucional, nombre, marca, modelo, numero_serie, estado_operativo, situacion, ambiente_id, categorias_equipos(nombre), ambientes!inner(piso_id), marcadores_mapa(x, y)',
-    )
-    .eq('ambientes.piso_id', pisoId)
-    .eq('situacion', 'activo')
-    .order('codigo_institucional')
+  .from('equipos')
+  .select(
+    'id, codigo_institucional, nombre, marca, modelo, numero_serie, estado_operativo, situacion, ambiente_id, categorias_equipos(nombre), ambientes!inner(piso_id)'
+  )
+  .eq('ambientes.piso_id', pisoId)
+  .eq('situacion', 'activo')
+  .order('codigo_institucional')
   if (error) throw error
 
   return (data ?? []).map((item) => {
@@ -177,15 +177,11 @@ export async function listarEquiposPiso(pisoId: string): Promise<EquipoUbicacion
       situacion: string
       ambiente_id: string | null
       categorias_equipos: { nombre: string } | { nombre: string }[] | null
-      marcadores_mapa: { x: number; y: number } | { x: number; y: number }[] | null
     }
     const categoria = Array.isArray(fila.categorias_equipos)
       ? fila.categorias_equipos[0] ?? null
       : fila.categorias_equipos
-    const marcador = Array.isArray(fila.marcadores_mapa)
-      ? fila.marcadores_mapa[0] ?? null
-      : fila.marcadores_mapa
-    return { ...fila, categoria, marcador }
+    return { ...fila, categoria, marcador: null }
   })
 }
 
