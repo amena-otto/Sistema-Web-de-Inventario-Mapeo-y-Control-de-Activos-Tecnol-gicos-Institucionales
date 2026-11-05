@@ -58,8 +58,6 @@ Deno.serve(async (request: Request) => {
   if (
     email.length > 254 ||
     !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
-    (!email.endsWith('@ottotonsmann.edu.pe') &&
-      !email.endsWith('@gmail.com')) ||
     nombres.length < 1 ||
     nombres.length > 100 ||
     apellidos.length < 1 ||
@@ -71,7 +69,7 @@ Deno.serve(async (request: Request) => {
     !esRol(rol)
   ) {
     return respuesta(
-      { error: 'Usa un correo @ottotonsmann.edu.pe o @gmail.com y revisa nombres, apellidos y rol. La contraseña requiere 8 caracteres, mayúscula, minúscula y número.' },
+      { error: 'Usa un correo válido y revisa nombres, apellidos y rol. La contraseña requiere 8 caracteres, mayúscula, minúscula y número.' },
       400,
     )
   }

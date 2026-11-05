@@ -12,6 +12,7 @@ import {
   crearCategoria,
   crearEquipo,
   darDeBajaEquipo,
+  eliminarCategoria,
   eliminarFotografia,
   estadosOperativos,
   establecerFotografiaPrincipal,
@@ -136,6 +137,7 @@ export default function Equipos() {
   const [categoriaNueva, setCategoriaNueva] = useState('')
   const [guardando, setGuardando] = useState(false)
   const [guardandoCategoria, setGuardandoCategoria] = useState(false)
+  const [eliminandoCategoria, setEliminandoCategoria] = useState<string | null>(null)
   const [editando, setEditando] = useState<Equipo | null>(null)
   const [cargandoDatosEdicion, setCargandoDatosEdicion] = useState(false)
   const [errorDatosEdicion, setErrorDatosEdicion] = useState('')
@@ -531,6 +533,34 @@ export default function Equipos() {
       setError(mostrarError(e, 'No se pudo crear la categoría.'))
     } finally {
       setGuardandoCategoria(false)
+    }
+  }
+
+  async function borrarCategoria(categoria: Categoria) {
+    if (eliminandoCategoria) return
+    if (
+      !window.confirm(
+        `¿Eliminar la categoría "${categoria.nombre}"? Esta acción no se puede deshacer.`,
+      )
+    ) {
+      return
+    }
+
+    setEliminandoCategoria(categoria.id)
+    setError('')
+    setAviso('')
+    try {
+      await eliminarCategoria(categoria.id)
+      setCategorias((actuales) => actuales.filter((item) => item.id !== categoria.id))
+      setDatos((actual) =>
+        actual.categoria_id === categoria.id ? { ...actual, categoria_id: '' } : actual,
+      )
+      setCategoriaFiltro((actual) => (actual === categoria.id ? '' : actual))
+      setAviso(`Categoría "${categoria.nombre}" eliminada.`)
+    } catch (e) {
+      setError(mostrarError(e, 'No se pudo eliminar la categoría.'))
+    } finally {
+      setEliminandoCategoria(null)
     }
   }
 
@@ -993,10 +1023,10 @@ export default function Equipos() {
           {puedeAdministrarCategorias && (
             <button
               type="button"
-              onClick={() => { setCategoriaNueva(''); setCategoriaModal(true) }}
+              onClick={() => { setCategoriaNueva(''); setError(''); setAviso(''); setCategoriaModal(true) }}
               className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
             >
-              Crear categoría
+              Gestionar categorías
             </button>
           )}
           {puedeCrear && (
@@ -1314,17 +1344,59 @@ export default function Equipos() {
 
       {categoriaModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
-          <form onSubmit={(event) => void agregarCategoria(event)} className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl">
-            <h3 className="text-lg font-semibold">Nueva categoría de equipo</h3>
-            <p className="mt-1 text-sm text-slate-500">Ejemplos: computadoras, impresoras, redes o periféricos.</p>
-            <label className="mt-4 block text-sm">Nombre
-              <input autoFocus required maxLength={100} value={categoriaNueva} onChange={(event) => setCategoriaNueva(event.target.value)} className="mt-1 w-full rounded border border-slate-300 px-3 py-2" />
-            </label>
-            <div className="mt-4 flex justify-end gap-2">
-              <button type="button" disabled={guardandoCategoria} onClick={() => setCategoriaModal(false)} className="rounded border border-slate-300 px-4 py-2">Cancelar</button>
-              <button type="submit" disabled={guardandoCategoria} className="rounded bg-blue-600 px-4 py-2 font-semibold text-white disabled:opacity-60">{guardandoCategoria ? 'Guardando...' : 'Crear categoría'}</button>
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="categorias-titulo"
+            className="max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-5 shadow-xl"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h3 id="categorias-titulo" className="text-lg font-semibold">Gestionar categorías</h3>
+                <p className="mt-1 text-sm text-slate-500">Solo puedes eliminar categorías que no tengan equipos asignados.</p>
+              </div>
+              <button type="button" onClick={() => setCategoriaModal(false)} className="shrink-0 rounded px-2 py-1 text-sm text-slate-500 hover:bg-slate-100">Cerrar</button>
             </div>
-          </form>
+
+            {error && (
+              <p role="alert" className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>
+            )}
+            {aviso && (
+              <p role="status" className="mt-4 rounded-lg bg-green-50 p-3 text-sm text-green-700">{aviso}</p>
+            )}
+
+            <ul aria-label="Categorías existentes" className="mt-4 divide-y divide-slate-100 rounded-lg border border-slate-200">
+              {categorias.length === 0 ? (
+                <li className="px-3 py-4 text-sm text-slate-500">No hay categorías activas.</li>
+              ) : (
+                categorias.map((categoria) => (
+                  <li key={categoria.id} className="flex items-center justify-between gap-3 px-3 py-2">
+                    <span className="min-w-0 break-words text-sm text-slate-800">{categoria.nombre}</span>
+                    <button
+                      type="button"
+                      disabled={eliminandoCategoria !== null}
+                      onClick={() => void borrarCategoria(categoria)}
+                      className="shrink-0 rounded border border-red-300 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50 disabled:opacity-60"
+                    >
+                      {eliminandoCategoria === categoria.id ? 'Eliminando...' : 'Eliminar'}
+                    </button>
+                  </li>
+                ))
+              )}
+            </ul>
+
+            <form onSubmit={(event) => void agregarCategoria(event)} className="mt-5 border-t border-slate-100 pt-5">
+              <h4 className="text-sm font-semibold text-slate-900">Nueva categoría</h4>
+              <p className="mt-1 text-sm text-slate-500">Ejemplos: computadoras, impresoras, redes o periféricos.</p>
+              <label className="mt-3 block text-sm">Nombre
+                <input autoFocus required maxLength={100} value={categoriaNueva} onChange={(event) => setCategoriaNueva(event.target.value)} className="mt-1 w-full rounded border border-slate-300 px-3 py-2" />
+              </label>
+              <div className="mt-4 flex justify-end gap-2">
+                <button type="button" disabled={guardandoCategoria} onClick={() => setCategoriaModal(false)} className="rounded border border-slate-300 px-4 py-2">Cerrar</button>
+                <button type="submit" disabled={guardandoCategoria} className="rounded bg-blue-600 px-4 py-2 font-semibold text-white disabled:opacity-60">{guardandoCategoria ? 'Guardando...' : 'Crear categoría'}</button>
+              </div>
+            </form>
+          </section>
         </div>
       )}
 
