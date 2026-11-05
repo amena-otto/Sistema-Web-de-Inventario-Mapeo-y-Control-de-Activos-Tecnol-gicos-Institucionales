@@ -114,7 +114,7 @@ export default function SearchableSelect({
                     onClick={() => {
                       onChange(option.value)
                       setOpen(false)
-              setQuery('')
+                      setQuery('')
                     }}
                     className={`w-full px-3 py-2 text-left text-sm hover:bg-slate-50 ${value === option.value ? 'bg-slate-50 font-medium' : ''}`}
                   >
