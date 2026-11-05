@@ -1,43 +1,32 @@
-import { useEffect, useMemo, useState, type FormEvent, type MouseEvent } from 'react'
+import { filtrarEquiposUbicacion, etiquetasEstadoUbicacion as etiquetaEstado } from '../utils/busquedaEquiposUbicacion'
+import { validarEquipo } from '../utils/inventario'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { usePermissions } from '../hooks/usePermissions'
 import { supabase } from '../services/supabaseClient'
 import {
-  actualizarMarcadorPosicion,
   eliminarAmbiente,
-  eliminarMarcador,
   eliminarPabellon,
   eliminarPiso,
-  eliminarPlano,
   guardarAmbiente,
-  guardarMarcador,
   guardarPabellon,
   guardarPiso,
   listarAmbientes,
   listarEquiposPiso,
   listarPabellones,
   listarPisos,
-  subirPlano,
-  urlPlano,
   type AmbienteUbicacion,
   type EquipoUbicacion,
   type Pabellon,
   type Piso,
 } from '../services/ubicacionesService'
-import { actualizarEquipo, cargarCatalogos, type Ambiente } from '../services/equiposService'
+import { obtenerEquipo, cargarCatalogos, type Ambiente } from '../services/equiposService'
+import { registrarMovimiento } from '../services/movimientosService'
 
 type TipoFormulario = 'pabellon' | 'piso' | 'ambiente'
 
 function mostrarError(error: unknown, defecto: string) {
   return error instanceof Error && error.message ? error.message : defecto
-}
-
-const etiquetaEstado: Record<string, string> = {
-  operativo: 'Operativo',
-  con_fallas: 'Con observaciones',
-  en_mantenimiento: 'En mantenimiento',
-  inoperativo: 'Inoperativo',
-  en_almacen: 'En almacén',
 }
 
 export default function Ubicaciones() {
@@ -51,11 +40,6 @@ export default function Ubicaciones() {
   const [pabellonElegido, setPabellonElegido] = useState('')
   const [pisoElegido, setPisoElegido] = useState('')
   const [ambienteElegido, setAmbienteElegido] = useState('')
-  const [planoUrl, setPlanoUrl] = useState('')
-  const [eliminandoPlano, setEliminandoPlano] = useState(false)
-  const [equipoParaMarcar, setEquipoParaMarcar] = useState('')
-  const [modoMoverMarcador, setModoMoverMarcador] = useState(false)
-  const [marcadorAMover, setMarcadorAMover] = useState<string | null>(null)
   const [catalogoAmbientes, setCatalogoAmbientes] = useState<Ambiente[]>([])
   const [cambioUbicacion, setCambioUbicacion] = useState({ abierto: false, equipoId: '', pabellonId: '', pisoId: '', ambienteId: '', guardando: false })
   const [ficha, setFicha] = useState<EquipoUbicacion | null>(null)
@@ -72,6 +56,7 @@ export default function Ubicaciones() {
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState('')
   const [aviso, setAviso] = useState('')
+  const [busqueda, setBusqueda] = useState('')
   const [recarga, setRecarga] = useState(0)
 
   useEffect(() => {
@@ -91,7 +76,7 @@ export default function Ubicaciones() {
       })
 
     const canal = supabaseCanal((tabla) => {
-      if (tabla === 'equipos' || tabla === 'ambientes' || tabla === 'marcadores_mapa') {
+      if (tabla === 'equipos' || tabla === 'ambientes') {
         setRecarga((actual) => actual + 1)
       }
       void Promise.all([listarPabellones(), listarPisos(), listarAmbientes()])
@@ -121,20 +106,17 @@ export default function Ubicaciones() {
   const pisoActual =
     pisosPabellon.find((piso) => piso.id === pisoElegido) ??
     pisosPabellon.find((piso) => piso.activo)
-  const pisoIdActual = pisoActual?.id ?? ''
-  const rutaPlanoActual = pisoActual?.plano_storage_path ?? ''
+  const pisoIdActual = `${pisoActual?.id ?? ''}`
   const ambientesPiso = ambientes.filter(
     (ambiente) => ambiente.piso_id === pisoActual?.id,
   )
   const ambientesVisibles = ambientesPiso.filter((ambiente) => ambiente.activo)
   const equiposVisibles = useMemo(
-    () =>
-      equipos.filter(
-        (equipo) =>
-          equipo.situacion === 'activo' &&
-          (!ambienteElegido || equipo.ambiente_id === ambienteElegido),
-      ),
-    [equipos, ambienteElegido],
+    () => filtrarEquiposUbicacion(
+      equipos, busqueda, ambienteElegido,
+      ambientes.filter((ambiente) => ambiente.piso_id === pisoIdActual).map((ambiente) => ambiente.id),
+    ),
+    [equipos, busqueda, ambienteElegido, ambientes, pisoIdActual],
   )
   const equiposPorAmbiente = useMemo(() => {
     const agrupados = new Map<string, EquipoUbicacion[]>()
@@ -164,27 +146,10 @@ export default function Ubicaciones() {
         if (vigente) setError(mostrarError(e, 'No se pudieron cargar los equipos del piso.'))
       })
 
-    if (rutaPlanoActual) {
-      void urlPlano(rutaPlanoActual)
-        .then((url) => {
-          if (vigente) setPlanoUrl(url)
-        })
-        .catch((e: unknown) => {
-          if (vigente) {
-            setPlanoUrl('')
-            setError(mostrarError(e, 'No se pudo abrir el plano.'))
-          }
-        })
-    } else {
-      void Promise.resolve().then(() => {
-        if (vigente) setPlanoUrl('')
-      })
-    }
-
     return () => {
       vigente = false
     }
-  }, [pisoIdActual, rutaPlanoActual, recarga])
+  }, [pisoIdActual, recarga])
 
   function abrirFormulario(
     tipo: TipoFormulario,
@@ -312,99 +277,13 @@ export default function Ubicaciones() {
     }
   }
 
-  async function manejarPlano(file: File | undefined) {
-    if (!file || !pisoActual) return
-    setError('')
-    setAviso('')
-    try {
-      const ruta = await subirPlano(pisoActual.id, file)
-      setPlanoUrl(await urlPlano(ruta))
-      const datosPisos = await listarPisos()
-      setPisos(datosPisos)
-      setRecarga((actual) => actual + 1)
-      setAviso(`Plano del ${pisoActual.nombre} actualizado.`)
-    } catch (e) {
-      setError(mostrarError(e, 'No se pudo guardar el plano.'))
-    }
-  }
-
-  async function manejarEliminarPlano() {
-    if (!pisoActual || !rutaPlanoActual || eliminandoPlano) return
-    if (
-      !window.confirm(
-        `¿Eliminar el plano de ${pisoActual.nombre}? Esta acción no se puede deshacer. Los marcadores de equipos se conservan.`,
-      )
-    ) {
-      return
-    }
-
-    setError('')
-    setAviso('')
-    setEliminandoPlano(true)
-    try {
-      const advertencia = await eliminarPlano(pisoActual.id, rutaPlanoActual)
-      setPlanoUrl('')
-      const datosPisos = await listarPisos()
-      setPisos(datosPisos)
-      setRecarga((actual) => actual + 1)
-      if (advertencia) {
-        setError(advertencia)
-      } else {
-        setAviso(`Plano del ${pisoActual.nombre} eliminado.`)
-      }
-    } catch (e) {
-      setError(mostrarError(e, 'No se pudo eliminar el plano.'))
-    } finally {
-      setEliminandoPlano(false)
-    }
-  }
-
-  async function colocarMarcador(event: MouseEvent<HTMLImageElement>) {
-    if (!pisoActual) return
-    const rect = event.currentTarget.getBoundingClientRect()
-    setError('')
-    if (modoMoverMarcador && marcadorAMover) {
-      const x = Number((((event.clientX - rect.left) / rect.width) * 100).toFixed(3))
-      const y = Number((((event.clientY - rect.top) / rect.height) * 100).toFixed(3))
-      try {
-        await actualizarMarcadorPosicion(marcadorAMover, x, y)
-        setModoMoverMarcador(false)
-        setMarcadorAMover(null)
-        setFicha(null)
-        setRecarga((actual) => actual + 1)
-      } catch (e) {
-        setError(mostrarError(e, 'No se pudo mover el marcador.'))
-      }
-      return
-    }
-    if (!equipoParaMarcar) return
-    const x = Number((((event.clientX - rect.left) / rect.width) * 100).toFixed(3))
-    const y = Number((((event.clientY - rect.top) / rect.height) * 100).toFixed(3))
-    try {
-      await guardarMarcador(equipoParaMarcar, pisoActual.id, x, y)
-      setEquipoParaMarcar('')
-      setAviso('Marcador guardado en el plano.')
-      setRecarga((actual) => actual + 1)
-    } catch (e: unknown) {
-      setError(
-        typeof e === 'object' && e !== null && 'message' in e && typeof e.message === 'string' && e.message
-          ? e.message
-          : mostrarError(e, 'No se pudo guardar el marcador.'),
-      )
-    }
-  }
-
-  const equiposMismoPisoSinMarcador = equipos.filter(
-    (equipo) => equipo.situacion === 'activo' && !equipo.marcador,
-  )
-
   return (
     <section>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-2xl font-semibold">Ubicaciones y mapeo</h2>
+          <h2 className="text-2xl font-semibold">Ubicaciones institucionales</h2>
           <p className="mt-1 text-sm text-slate-600">
-            Explora los pabellones, consulta los equipos por ambiente y ubícalos en el plano.
+            Explora pabellones, pisos y ambientes, y consulta los equipos de cada ubicación.
           </p>
         </div>
         {puedeAdministrar && (
@@ -421,17 +300,17 @@ export default function Ubicaciones() {
 
       <div className="mt-5 grid gap-3 rounded-xl bg-white p-4 shadow md:grid-cols-3">
         <label className="text-sm font-medium">Pabellón
-          <select value={pabellonActual?.id ?? ''} onChange={(event) => { setPabellonElegido(event.target.value); setPisoElegido(''); setAmbienteElegido('') }} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2">
+          <select value={pabellonActual?.id ?? ''} onChange={(event) => { setPabellonElegido(event.target.value); setPisoElegido(''); setAmbienteElegido(''); setBusqueda('') }} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2">
             {pabellones.filter((item) => item.activo || puedeAdministrar).map((item) => <option key={item.id} value={item.id}>{item.nombre}{item.activo ? '' : ' (inactivo)'}</option>)}
           </select>
         </label>
         <label className="text-sm font-medium">Piso
-          <select value={pisoActual?.id ?? ''} onChange={(event) => { setPisoElegido(event.target.value); setAmbienteElegido('') }} disabled={!pisosPabellon.length} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-100">
+          <select value={pisoActual?.id ?? ''} onChange={(event) => { setPisoElegido(event.target.value); setAmbienteElegido(''); setBusqueda('') }} disabled={!pisosPabellon.length} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-100">
             {pisosPabellon.filter((item) => item.activo || puedeAdministrar).map((item) => <option key={item.id} value={item.id}>{item.nombre}{item.activo ? '' : ' (inactivo)'}</option>)}
           </select>
         </label>
         <label className="text-sm font-medium">Ambiente
-          <select value={ambienteElegido} onChange={(event) => setAmbienteElegido(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2">
+          <select value={ambienteElegido} onChange={(event) => { setAmbienteElegido(event.target.value); setBusqueda('') }} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2">
             <option value="">Todos los ambientes del piso</option>
             {ambientesVisibles.map((item) => <option key={item.id} value={item.id}>{item.codigo} — {item.nombre}</option>)}
           </select>
@@ -454,7 +333,7 @@ export default function Ubicaciones() {
       {pabellonActual && (
         <div className="mt-4 flex flex-wrap gap-2">
           {pisosPabellon.filter((piso) => piso.activo).map((piso) => (
-            <button key={piso.id} type="button" onClick={() => { setPisoElegido(piso.id); setAmbienteElegido('') }} className={`rounded-full px-4 py-2 text-sm font-medium ${pisoActual?.id === piso.id ? 'bg-blue-600 text-white' : 'border border-slate-300 bg-white text-slate-700'}`}>
+            <button key={piso.id} type="button" onClick={() => { setPisoElegido(piso.id); setAmbienteElegido(''); setBusqueda('') }} className={`rounded-full px-4 py-2 text-sm font-medium ${pisoActual?.id === piso.id ? 'bg-blue-600 text-white' : 'border border-slate-300 bg-white text-slate-700'}`}>
               {piso.nombre}
             </button>
           ))}
@@ -482,68 +361,7 @@ export default function Ubicaciones() {
             ))}
           </div>
 
-          <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.6fr)_minmax(300px,1fr)]">
-            <section className="rounded-xl bg-white p-4 shadow">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h3 className="font-semibold">Plano de {pabellonActual?.nombre} · {pisoActual.nombre}</h3>
-                  <p className="text-xs text-slate-500">Selecciona un marcador para consultar el equipo.</p>
-                </div>
-                {puedeAdministrar && (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <label className="cursor-pointer rounded border border-slate-300 px-3 py-2 text-sm">
-                      Cargar o cambiar plano
-                      <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; if (file) void manejarPlano(file); event.currentTarget.value = '' }} />
-                    </label>
-                    {rutaPlanoActual && (
-                      <button
-                        type="button"
-                        onClick={() => void manejarEliminarPlano()}
-                        disabled={eliminandoPlano}
-                        className="rounded border border-red-200 px-3 py-2 text-sm text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {eliminandoPlano ? 'Eliminando...' : 'Eliminar plano'}
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {planoUrl ? (
-                <>
-                  {puedeEditarEquipo && (
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
-                      <label htmlFor="equipo-marcador" className="text-sm">Equipo para ubicar</label>
-                      <select id="equipo-marcador" value={equipoParaMarcar} onChange={(event) => { setEquipoParaMarcar(event.target.value); setModoMoverMarcador(false); setMarcadorAMover(null); }} className="min-w-64 rounded border border-slate-300 px-3 py-2 text-sm">
-                        <option value="">Selecciona un equipo</option>
-                        {equipos.map((equipo) => <option key={equipo.id} value={equipo.id}>{equipo.codigo_institucional} — {equipo.nombre}{equipo.marcador ? ' (reubicar)' : ''}</option>)}
-                      </select>
-                    </div>
-                  )}
-                  <div className={`relative mt-3 inline-block max-w-full ${equipoParaMarcar || modoMoverMarcador || marcadorAMover ? 'cursor-crosshair' : ''}`}>
-                    <img src={planoUrl} alt={`Plano del ${pabellonActual?.nombre}, ${pisoActual.nombre}`} onClick={(event) => { if (equipoParaMarcar || modoMoverMarcador || marcadorAMover) void colocarMarcador(event) }} className="block max-h-[70vh] max-w-full rounded-lg border border-slate-200 object-contain" />
-                    {equipos.filter((item) => item.situacion === 'activo' && item.marcador).map((equipo) => (
-                      <button key={equipo.id} type="button" title={`${equipo.codigo_institucional} — ${equipo.nombre}`} onClick={(event) => { event.stopPropagation(); setFicha(equipo) }} style={{ left: `${equipo.marcador?.x}%`, top: `${equipo.marcador?.y}%` }} className="absolute flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-white bg-blue-700 text-xs font-bold text-white shadow-lg hover:scale-110">
-                        {equipo.codigo_institucional.slice(-2)}
-                      </button>
-                    ))}
-                  </div>
-                  {equipoParaMarcar && <p className="mt-2 text-sm text-blue-700">Haz clic en el punto del plano donde se encuentra el equipo.</p>}
-                  {(modoMoverMarcador || marcadorAMover) && <p className="mt-2 text-sm text-blue-700">Haz clic en el nuevo punto del plano para reubicar el marcador.</p>}
-                  {modoMoverMarcador && <p className="mt-2 text-sm text-blue-700">Haz clic en el nuevo punto del plano para reubicar el marcador.</p>}
-                  <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-500">
-                    <span>{equipos.filter((item) => item.marcador && item.situacion === 'activo').length} marcadores visibles</span>
-                    <span>{equiposMismoPisoSinMarcador.length} equipos pendientes de ubicar</span>
-                  </div>
-                </>
-              ) : (
-                <div className="mt-4 rounded-lg border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">
-                  No hay un plano cargado para este piso.
-                  {puedeAdministrar && <p className="mt-1">El administrador puede cargar una imagen JPG, PNG o WebP.</p>}
-                </div>
-              )}
-            </section>
-
+          <div className="mt-5">
             <section className="rounded-xl bg-white p-4 shadow">
               <h3 className="font-semibold">Ambientes del piso</h3>
               {ambientesVisibles.length === 0 ? (
@@ -554,7 +372,7 @@ export default function Ubicaciones() {
                     const lista = equiposPorAmbiente.get(ambiente.id) ?? []
                     return (
                       <li key={ambiente.id}>
-                        <button type="button" onClick={() => setAmbienteElegido(ambienteElegido === ambiente.id ? '' : ambiente.id)} className={`w-full rounded-lg border p-3 text-left ${ambienteElegido === ambiente.id ? 'border-blue-400 bg-blue-50' : 'border-slate-200 hover:bg-slate-50'}`}>
+                        <button type="button" onClick={() => { setAmbienteElegido(ambienteElegido === ambiente.id ? '' : ambiente.id); setBusqueda('') }} className={`w-full rounded-lg border p-3 text-left ${ambienteElegido === ambiente.id ? 'border-blue-400 bg-blue-50' : 'border-slate-200 hover:bg-slate-50'}`}>
                           <span className="flex items-center justify-between gap-2">
                             <span className="font-medium">{ambiente.codigo} · {ambiente.nombre}</span>
                             <span className="rounded bg-slate-100 px-2 py-0.5 text-xs">{lista.length} equipos</span>
@@ -569,34 +387,42 @@ export default function Ubicaciones() {
             </section>
           </div>
 
-          <section className="mt-5 overflow-x-auto rounded-xl bg-white shadow">
+          <section className="mt-5 min-w-0 rounded-xl bg-white shadow">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b p-4">
               <div>
                 <h3 className="font-semibold">{ambienteElegido ? 'Equipos del ambiente' : 'Equipos del piso'}</h3>
                 <p className="text-xs text-slate-500">La ubicación se obtiene de la relación del equipo con su ambiente.</p>
               </div>
-              <span className="text-sm text-slate-500">{equiposVisibles.length} equipos</span>
+              <span role="status" aria-live="polite" className="text-sm text-slate-500">{equiposVisibles.length} resultado(s) encontrado(s)</span>
             </div>
-            <table className="w-full min-w-[720px] text-left text-sm">
-              <thead className="bg-slate-50 text-slate-600">
-                <tr><th className="px-4 py-3">Código</th><th className="px-4 py-3">Equipo</th><th className="px-4 py-3">Ambiente</th><th className="px-4 py-3">Estado</th><th className="px-4 py-3">Plano</th></tr>
-              </thead>
-              <tbody>
-                {equiposVisibles.map((equipo) => {
-                  const ambiente = ambientes.find((item) => item.id === equipo.ambiente_id)
-                  return (
-                    <tr key={equipo.id} className="border-t">
-                      <td className="px-4 py-3 font-semibold text-blue-800">{equipo.codigo_institucional}</td>
-                      <td className="px-4 py-3">{equipo.nombre}<p className="text-xs text-slate-500">{equipo.marca ?? ''} {equipo.modelo ?? ''}</p></td>
-                      <td className="px-4 py-3">{ambiente ? `${ambiente.codigo} — ${ambiente.nombre}` : '—'}</td>
-                      <td className="px-4 py-3">{etiquetaEstado[equipo.estado_operativo] ?? equipo.estado_operativo}</td>
-                      <td className="px-4 py-3">{equipo.marcador ? <button type="button" onClick={() => setFicha(equipo)} className="text-blue-700 underline">Ver marcador</button> : 'Sin marcador'}</td>
-                    </tr>
-                  )
-                })}
-                {equiposVisibles.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500">No hay equipos activos en esta selección.</td></tr>}
-              </tbody>
-            </table>
+            <div className="flex flex-col gap-2 border-b p-4 sm:flex-row sm:items-end">
+              <label className="min-w-0 flex-1 text-sm font-medium text-slate-700" htmlFor="buscar-equipos-ubicacion">Buscar equipos en esta selección
+                <input id="buscar-equipos-ubicacion" type="search" value={busqueda} onChange={(event) => setBusqueda(event.target.value)} placeholder="Código, nombre, serie, marca, modelo o estado" className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2" />
+              </label>
+              <button type="button" disabled={!busqueda} onClick={() => setBusqueda('')} className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 disabled:opacity-50">Limpiar búsqueda</button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[720px] text-left text-sm">
+                <thead className="bg-slate-50 text-slate-600">
+                  <tr><th className="px-4 py-3">Código</th><th className="px-4 py-3">Equipo</th><th className="px-4 py-3">Ambiente</th><th className="px-4 py-3">Estado</th><th className="px-4 py-3">Acciones</th></tr>
+                </thead>
+                <tbody>
+                  {equiposVisibles.map((equipo) => {
+                    const ambiente = ambientes.find((item) => item.id === equipo.ambiente_id)
+                    return (
+                      <tr key={equipo.id} className="border-t">
+                        <td className="px-4 py-3 font-semibold text-blue-800">{equipo.codigo_institucional}</td>
+                        <td className="px-4 py-3">{equipo.nombre}<p className="text-xs text-slate-500">{equipo.marca ?? ''} {equipo.modelo ?? ''}</p></td>
+                        <td className="px-4 py-3">{ambiente ? `${ambiente.codigo} — ${ambiente.nombre}` : '—'}</td>
+                        <td className="px-4 py-3">{etiquetaEstado[equipo.estado_operativo] ?? equipo.estado_operativo}</td>
+                        <td className="px-4 py-3"><button type="button" onClick={() => setFicha(equipo)} className="text-blue-700 underline">Ver equipo</button></td>
+                      </tr>
+                    )
+                  })}
+                  {equiposVisibles.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500">No se encontraron equipos</td></tr>}
+                </tbody>
+              </table>
+            </div>
           </section>
         </>
       )}
@@ -655,12 +481,8 @@ export default function Ubicaciones() {
               <div><dt className="text-slate-500">Ambiente</dt><dd>{ambientes.find((item) => item.id === ficha.ambiente_id)?.nombre ?? '—'}</dd></div>
             </dl>
             <div className="mt-5 flex flex-wrap justify-end gap-2">
-              {ficha.marcador && (
-                <>
-                  <button type="button" onClick={() => { setModoMoverMarcador(true); setMarcadorAMover(ficha.id); setFicha(null); setError(''); }} className="rounded border border-slate-300 px-3 py-2 text-sm">Reubicar marcador</button>
-                  <button type="button" onClick={async () => { if (!confirm('¿Quitar marcador de este equipo? Se conservará en inventario.')) return; try { await eliminarMarcador(ficha.id); setFicha(null); if (pisoElegido) { const datos = await listarEquiposPiso(pisoElegido); setEquipos(datos); } } catch (e) { setError(mostrarError(e, 'No se pudo quitar el marcador.')); } }} className="rounded border border-red-200 px-3 py-2 text-sm text-red-700 hover:bg-red-50">Quitar marcador</button>
-                  <button type="button" onClick={() => { setCambioUbicacion({ abierto: true, equipoId: ficha.id, pabellonId: pabellonActual?.id ?? '', pisoId: pisoActual?.id ?? '', ambienteId: ficha.ambiente_id ?? '', guardando: false }); setFicha(null); }} className="rounded border border-blue-200 px-3 py-2 text-sm text-blue-700 hover:bg-blue-50">Cambiar ubicación</button>
-                </>
+              {puedeEditarEquipo && (
+                <button type="button" onClick={() => { setCambioUbicacion({ abierto: true, equipoId: ficha.id, pabellonId: pabellonActual?.id ?? '', pisoId: pisoActual?.id ?? '', ambienteId: ficha.ambiente_id ?? '', guardando: false }); setFicha(null) }} className="rounded border border-blue-200 px-3 py-2 text-sm text-blue-700">Cambiar ubicación</button>
               )}
               <Link to={`/equipos?equipo=${encodeURIComponent(ficha.id)}`} className="rounded bg-blue-600 px-4 py-2 text-sm font-semibold text-white">Abrir ficha completa</Link>
               <button type="button" onClick={() => setFicha(null)} className="rounded border border-slate-300 px-4 py-2 text-sm">Cerrar</button>
@@ -703,11 +525,23 @@ export default function Ubicaciones() {
             <div className="mt-5 flex justify-end gap-2">
               <button type="button" disabled={cambioUbicacion.guardando} onClick={() => setCambioUbicacion({ abierto: false, equipoId: '', pabellonId: '', pisoId: '', ambienteId: '', guardando: false })} className="rounded border border-slate-300 px-4 py-2 text-sm">Cancelar</button>
               <button type="button" disabled={cambioUbicacion.guardando || !cambioUbicacion.ambienteId} onClick={async () => {
+                if (!puedeEditarEquipo) return
                 setCambioUbicacion((a) => ({ ...a, guardando: true }))
                 try {
-                  await actualizarEquipo(cambioUbicacion.equipoId, { ambiente_id: cambioUbicacion.ambienteId })
+                  const [equipo, catalogos] = await Promise.all([obtenerEquipo(cambioUbicacion.equipoId), cargarCatalogos()])
+                  const errores = validarEquipo({ ...equipo, ambiente_id: cambioUbicacion.ambienteId }, catalogos)
+                  if (Object.keys(errores).length) throw new Error(`${Object.values(errores).join(' ')} Completa la ficha del equipo antes de trasladarlo.`)
+                  const fecha = new Date()
+                  await registrarMovimiento({
+                    equipoId: equipo.id,
+                    ambienteDestinoId: cambioUbicacion.ambienteId,
+                    responsableNuevoId: equipo.responsable_id,
+                    posicionNueva: equipo.posicion,
+                    fecha: new Date(fecha.getTime() - fecha.getTimezoneOffset() * 60000).toISOString().slice(0, 10),
+                    motivo: 'Traslado desde ubicaciones',
+                  })
                   setCambioUbicacion({ abierto: false, equipoId: '', pabellonId: '', pisoId: '', ambienteId: '', guardando: false })
-                  if (pisoElegido) { const datos = await listarEquiposPiso(pisoElegido); setEquipos(datos); }
+                  if (pisoIdActual) { const datos = await listarEquiposPiso(pisoIdActual); setEquipos(datos); }
                 } catch (e) {
                   setError(mostrarError(e, 'No se pudo cambiar la ubicación.'))
                   setCambioUbicacion((a) => ({ ...a, guardando: false }))
@@ -729,7 +563,6 @@ function supabaseCanal(
   const canal = supabaseClientChannel()
     .on('postgres_changes', { event: '*', schema: 'public', table: 'equipos' }, () => alCambiar('equipos'))
     .on('postgres_changes', { event: '*', schema: 'public', table: 'ambientes' }, () => alCambiar('ambientes'))
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'marcadores_mapa' }, () => alCambiar('marcadores_mapa'))
     .subscribe()
   return async () => {
     await canal.unsubscribe()
@@ -737,5 +570,5 @@ function supabaseCanal(
 }
 
 function supabaseClientChannel() {
-  return supabase.channel('mapeo-institucional')
+  return supabase.channel('ubicaciones-institucionales')
 }
