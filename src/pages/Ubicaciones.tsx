@@ -1,4 +1,5 @@
 import { filtrarEquiposUbicacion, etiquetasEstadoUbicacion as etiquetaEstado } from '../utils/busquedaEquiposUbicacion'
+import { idsAmbientesDelPiso, registrarErrorSupabase } from '../utils/equiposPiso'
 import { validarEquipo } from '../utils/inventario'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
@@ -69,7 +70,9 @@ export default function Ubicaciones() {
         setAmbientes(datosAmbientes)
       })
       .catch((e: unknown) => {
-        if (vigente) setError(mostrarError(e, 'No se pudieron cargar las ubicaciones.'))
+        if (!vigente) return
+        registrarErrorSupabase('No se pudieron cargar las ubicaciones', e)
+        setError(mostrarError(e, 'No se pudieron cargar las ubicaciones.'))
       })
       .finally(() => {
         if (vigente) setCargando(false)
@@ -87,7 +90,9 @@ export default function Ubicaciones() {
           setAmbientes(datosAmbientes)
         })
         .catch((e: unknown) => {
-          if (vigente) setError(mostrarError(e, 'No se pudieron actualizar las ubicaciones.'))
+          if (!vigente) return
+          registrarErrorSupabase('No se pudieron actualizar las ubicaciones', e)
+          setError(mostrarError(e, 'No se pudieron actualizar las ubicaciones.'))
         })
     })
 
@@ -111,12 +116,13 @@ export default function Ubicaciones() {
     (ambiente) => ambiente.piso_id === pisoActual?.id,
   )
   const ambientesVisibles = ambientesPiso.filter((ambiente) => ambiente.activo)
+  const ambienteIdsPiso = useMemo(
+    () => idsAmbientesDelPiso(ambientes, pisoIdActual),
+    [ambientes, pisoIdActual],
+  )
   const equiposVisibles = useMemo(
-    () => filtrarEquiposUbicacion(
-      equipos, busqueda, ambienteElegido,
-      ambientes.filter((ambiente) => ambiente.piso_id === pisoIdActual).map((ambiente) => ambiente.id),
-    ),
-    [equipos, busqueda, ambienteElegido, ambientes, pisoIdActual],
+    () => filtrarEquiposUbicacion(equipos, busqueda, ambienteElegido, ambienteIdsPiso),
+    [equipos, busqueda, ambienteElegido, ambienteIdsPiso],
   )
   const equiposPorAmbiente = useMemo(() => {
     const agrupados = new Map<string, EquipoUbicacion[]>()
@@ -134,22 +140,31 @@ export default function Ubicaciones() {
 
     let vigente = true
     Promise.all([
-      listarEquiposPiso(pisoIdActual),
-      cargarCatalogos().catch(() => null),
+      listarEquiposPiso(ambienteIdsPiso),
+      cargarCatalogos().catch((e: unknown) => {
+        registrarErrorSupabase(
+          'No se pudieron cargar los catálogos para ubicaciones',
+          e,
+        )
+        return null
+      }),
     ])
       .then(([datos, catalogos]) => {
         if (!vigente) return
         setEquipos(datos)
         if (catalogos?.ambientes) setCatalogoAmbientes(catalogos.ambientes)
+        setError('')
       })
       .catch((e: unknown) => {
-        if (vigente) setError(mostrarError(e, 'No se pudieron cargar los equipos del piso.'))
+        if (!vigente) return
+        registrarErrorSupabase('No se pudieron cargar los equipos del piso', e)
+        setError(mostrarError(e, 'No se pudieron cargar los equipos del piso.'))
       })
 
     return () => {
       vigente = false
     }
-  }, [pisoIdActual, recarga])
+  }, [pisoIdActual, ambienteIdsPiso, recarga])
 
   function abrirFormulario(
     tipo: TipoFormulario,
@@ -227,6 +242,7 @@ export default function Ubicaciones() {
       setFormulario(null)
       setAviso('La ubicación se guardó correctamente.')
     } catch (e) {
+      registrarErrorSupabase('No se pudo guardar la ubicación', e)
       setError(mostrarError(e, 'No se pudo guardar la ubicación.'))
     } finally {
       setGuardando(false)
@@ -271,6 +287,7 @@ export default function Ubicaciones() {
       setFormulario(null)
       setAviso('La ubicación se eliminó correctamente.')
     } catch (e) {
+      registrarErrorSupabase('No se pudo eliminar la ubicación', e)
       setError(mostrarError(e, 'No se pudo eliminar la ubicación.'))
     } finally {
       setGuardando(false)
@@ -541,8 +558,9 @@ export default function Ubicaciones() {
                     motivo: 'Traslado desde ubicaciones',
                   })
                   setCambioUbicacion({ abierto: false, equipoId: '', pabellonId: '', pisoId: '', ambienteId: '', guardando: false })
-                  if (pisoIdActual) { const datos = await listarEquiposPiso(pisoIdActual); setEquipos(datos); }
+                  if (pisoIdActual) { const datos = await listarEquiposPiso(ambienteIdsPiso); setEquipos(datos); }
                 } catch (e) {
+                  registrarErrorSupabase('No se pudo cambiar la ubicación', e)
                   setError(mostrarError(e, 'No se pudo cambiar la ubicación.'))
                   setCambioUbicacion((a) => ({ ...a, guardando: false }))
                 }
