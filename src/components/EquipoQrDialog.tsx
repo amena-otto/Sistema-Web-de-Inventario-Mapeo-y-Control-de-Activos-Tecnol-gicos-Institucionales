@@ -130,12 +130,12 @@ export default function EquipoQrDialog({ equipo, equipos, onClose }: Props) {
             <h3 className="mb-2 text-sm font-semibold text-slate-700">Hoja {indice + 1} de {paginas.length} · {pagina.length} etiqueta(s)</h3>
             <div className="overflow-x-auto rounded-lg border border-slate-200 bg-slate-100 p-3">
               <div className="qr-hoja-preview" style={{ padding: `${formato.margenVerticalMm}mm ${formato.margenHorizontalMm}mm`, gridTemplateRows: `repeat(${formato.filas}, ${formato.altoMm}mm)` }}>
-                {pagina.map((etiqueta) => <img key={etiqueta.id} src={etiqueta.imagen} alt={`Etiqueta de ${etiqueta.nombre}, código ${etiqueta.codigo_institucional}`} className="qr-etiqueta-preview" style={{ height: `${formato.altoMm}mm` }} />)}
+                {pagina.map((etiqueta) => <img key={etiqueta.id} src={etiqueta.imagen} alt={`Etiqueta de ${etiqueta.nombre}, código ${etiqueta.codigo_institucional}, serie ${etiqueta.numero_serie ?? 'Sin serie'}`} className="qr-etiqueta-preview" style={{ height: `${formato.altoMm}mm` }} />)}
               </div>
             </div>
           </section>
         ))}
-        {etiquetas.length > 0 && <section className="mt-5"><h3 className="text-sm font-semibold text-slate-800">Descargar etiquetas completas y comprobar enlaces</h3><ul className="mt-2 divide-y divide-slate-100">{etiquetas.map((etiqueta) => <li key={etiqueta.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm"><a href={etiqueta.url} target="_blank" rel="noopener noreferrer" className="break-all text-blue-800 underline">{etiqueta.codigo_institucional} — {etiqueta.nombre}</a><button type="button" onClick={() => descargar(etiqueta)} className="shrink-0 rounded border border-slate-300 px-3 py-2">Descargar PNG</button></li>)}</ul></section>}
+        {etiquetas.length > 0 && <section className="mt-5"><h3 className="text-sm font-semibold text-slate-800">Descargar etiquetas completas y comprobar enlaces</h3><ul className="mt-2 divide-y divide-slate-100">{etiquetas.map((etiqueta) => <li key={etiqueta.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm"><a href={etiqueta.url} target="_blank" rel="noopener noreferrer" className="break-all text-blue-800 underline">{etiqueta.codigo_institucional} — {etiqueta.nombre} <span className="text-slate-600">· Serie {etiqueta.numero_serie ?? 'Sin serie'}</span></a><button type="button" onClick={() => descargar(etiqueta)} className="shrink-0 rounded border border-slate-300 px-3 py-2">Descargar PNG</button></li>)}</ul></section>}
       </section>
     </div>
   )

@@ -4,6 +4,15 @@ import { validarEquipo } from '../utils/inventario'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { usePermissions } from '../hooks/usePermissions'
+import EstadoEquipoBadge from '../components/EstadoEquipoBadge'
+import EstadoVacio from '../components/EstadoVacio'
+import Paginacion from '../components/Paginacion'
+import {
+  calcularRangoVisible,
+  normalizarPorPagina,
+  POR_PAGINA_PREDETERMINADO,
+  type PorPagina,
+} from '../utils/paginacion'
 import { supabase } from '../services/supabaseClient'
 import {
   eliminarAmbiente,
@@ -58,6 +67,10 @@ export default function Ubicaciones() {
   const [error, setError] = useState('')
   const [aviso, setAviso] = useState('')
   const [busqueda, setBusqueda] = useState('')
+  const [paginaEquipos, setPaginaEquipos] = useState(1)
+  const [porPaginaEquipos, setPorPaginaEquipos] = useState<PorPagina>(
+    POR_PAGINA_PREDETERMINADO,
+  )
   const [recarga, setRecarga] = useState(0)
 
   useEffect(() => {
@@ -124,6 +137,19 @@ export default function Ubicaciones() {
     () => filtrarEquiposUbicacion(equipos, busqueda, ambienteElegido, ambienteIdsPiso),
     [equipos, busqueda, ambienteElegido, ambienteIdsPiso],
   )
+  const rangoEquipos = calcularRangoVisible(
+    paginaEquipos,
+    porPaginaEquipos,
+    equiposVisibles.length,
+  )
+  const equiposPagina = useMemo(
+    () =>
+      equiposVisibles.slice(
+        (rangoEquipos.pagina - 1) * porPaginaEquipos,
+        rangoEquipos.pagina * porPaginaEquipos,
+      ),
+    [equiposVisibles, rangoEquipos.pagina, porPaginaEquipos],
+  )
   const equiposPorAmbiente = useMemo(() => {
     const agrupados = new Map<string, EquipoUbicacion[]>()
     for (const equipo of equipos) {
@@ -165,6 +191,32 @@ export default function Ubicaciones() {
       vigente = false
     }
   }, [pisoIdActual, ambienteIdsPiso, recarga])
+
+  function cambiarBusqueda(valor: string) {
+    setBusqueda(valor)
+    setPaginaEquipos(1)
+  }
+
+  function elegirPabellon(valor: string) {
+    setPabellonElegido(valor)
+    setPisoElegido('')
+    setAmbienteElegido('')
+    setBusqueda('')
+    setPaginaEquipos(1)
+  }
+
+  function elegirPiso(valor: string) {
+    setPisoElegido(valor)
+    setAmbienteElegido('')
+    setBusqueda('')
+    setPaginaEquipos(1)
+  }
+
+  function elegirAmbiente(valor: string) {
+    setAmbienteElegido(valor)
+    setBusqueda('')
+    setPaginaEquipos(1)
+  }
 
   function abrirFormulario(
     tipo: TipoFormulario,
@@ -317,17 +369,17 @@ export default function Ubicaciones() {
 
       <div className="mt-5 grid gap-3 rounded-xl bg-white p-4 shadow md:grid-cols-3">
         <label className="text-sm font-medium">Pabellón
-          <select value={pabellonActual?.id ?? ''} onChange={(event) => { setPabellonElegido(event.target.value); setPisoElegido(''); setAmbienteElegido(''); setBusqueda('') }} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2">
+          <select value={pabellonActual?.id ?? ''} onChange={(event) => elegirPabellon(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2">
             {pabellones.filter((item) => item.activo || puedeAdministrar).map((item) => <option key={item.id} value={item.id}>{item.nombre}{item.activo ? '' : ' (inactivo)'}</option>)}
           </select>
         </label>
         <label className="text-sm font-medium">Piso
-          <select value={pisoActual?.id ?? ''} onChange={(event) => { setPisoElegido(event.target.value); setAmbienteElegido(''); setBusqueda('') }} disabled={!pisosPabellon.length} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-100">
+          <select value={pisoActual?.id ?? ''} onChange={(event) => elegirPiso(event.target.value)} disabled={!pisosPabellon.length} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-100">
             {pisosPabellon.filter((item) => item.activo || puedeAdministrar).map((item) => <option key={item.id} value={item.id}>{item.nombre}{item.activo ? '' : ' (inactivo)'}</option>)}
           </select>
         </label>
         <label className="text-sm font-medium">Ambiente
-          <select value={ambienteElegido} onChange={(event) => { setAmbienteElegido(event.target.value); setBusqueda('') }} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2">
+          <select value={ambienteElegido} onChange={(event) => elegirAmbiente(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2">
             <option value="">Todos los ambientes del piso</option>
             {ambientesVisibles.map((item) => <option key={item.id} value={item.id}>{item.codigo} — {item.nombre}</option>)}
           </select>
@@ -350,7 +402,7 @@ export default function Ubicaciones() {
       {pabellonActual && (
         <div className="mt-4 flex flex-wrap gap-2">
           {pisosPabellon.filter((piso) => piso.activo).map((piso) => (
-            <button key={piso.id} type="button" onClick={() => { setPisoElegido(piso.id); setAmbienteElegido(''); setBusqueda('') }} className={`rounded-full px-4 py-2 text-sm font-medium ${pisoActual?.id === piso.id ? 'bg-blue-600 text-white' : 'border border-slate-300 bg-white text-slate-700'}`}>
+            <button key={piso.id} type="button" onClick={() => elegirPiso(piso.id)} className={`rounded-full px-4 py-2 text-sm font-medium ${pisoActual?.id === piso.id ? 'bg-blue-600 text-white' : 'border border-slate-300 bg-white text-slate-700'}`}>
               {piso.nombre}
             </button>
           ))}
@@ -389,7 +441,7 @@ export default function Ubicaciones() {
                     const lista = equiposPorAmbiente.get(ambiente.id) ?? []
                     return (
                       <li key={ambiente.id}>
-                        <button type="button" onClick={() => { setAmbienteElegido(ambienteElegido === ambiente.id ? '' : ambiente.id); setBusqueda('') }} className={`w-full rounded-lg border p-3 text-left ${ambienteElegido === ambiente.id ? 'border-blue-400 bg-blue-50' : 'border-slate-200 hover:bg-slate-50'}`}>
+                        <button type="button" onClick={() => elegirAmbiente(ambienteElegido === ambiente.id ? '' : ambiente.id)} className={`w-full rounded-lg border p-3 text-left ${ambienteElegido === ambiente.id ? 'border-blue-400 bg-blue-50' : 'border-slate-200 hover:bg-slate-50'}`}>
                           <span className="flex items-center justify-between gap-2">
                             <span className="font-medium">{ambiente.codigo} · {ambiente.nombre}</span>
                             <span className="rounded bg-slate-100 px-2 py-0.5 text-xs">{lista.length} equipos</span>
@@ -414,32 +466,112 @@ export default function Ubicaciones() {
             </div>
             <div className="flex flex-col gap-2 border-b p-4 sm:flex-row sm:items-end">
               <label className="min-w-0 flex-1 text-sm font-medium text-slate-700" htmlFor="buscar-equipos-ubicacion">Buscar equipos en esta selección
-                <input id="buscar-equipos-ubicacion" type="search" value={busqueda} onChange={(event) => setBusqueda(event.target.value)} placeholder="Código, nombre, serie, marca, modelo o estado" className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2" />
+                <input
+                  id="buscar-equipos-ubicacion"
+                  type="search"
+                  value={busqueda}
+                  onChange={(event) => cambiarBusqueda(event.target.value)}
+                  placeholder="Código, nombre, serie, marca, modelo o estado"
+                  className="mt-1 block min-h-11 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-800 placeholder:text-slate-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500"
+                />
               </label>
-              <button type="button" disabled={!busqueda} onClick={() => setBusqueda('')} className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 disabled:opacity-50">Limpiar búsqueda</button>
+              <button type="button" disabled={!busqueda} onClick={() => cambiarBusqueda('')} className="min-h-10 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 disabled:opacity-50">Limpiar búsqueda</button>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[720px] text-left text-sm">
-                <thead className="bg-slate-50 text-slate-600">
-                  <tr><th className="px-4 py-3">Código</th><th className="px-4 py-3">Equipo</th><th className="px-4 py-3">Ambiente</th><th className="px-4 py-3">Estado</th><th className="px-4 py-3">Acciones</th></tr>
-                </thead>
-                <tbody>
-                  {equiposVisibles.map((equipo) => {
+
+            {equiposVisibles.length === 0 ? (
+              <EstadoVacio
+                tipo={busqueda ? 'busqueda' : 'ubicacion'}
+                titulo={
+                  busqueda
+                    ? 'No encontramos equipos con esos criterios'
+                    : ambienteElegido
+                      ? 'Este ambiente no tiene equipos registrados'
+                      : 'Este piso no tiene equipos registrados'
+                }
+                descripcion={
+                  busqueda
+                    ? 'Prueba con otro código, serie o marca, o limpia la búsqueda para ver todos los equipos de la selección.'
+                    : 'Los equipos activos asignados a esta ubicación aparecerán aquí.'
+                }
+                accion={busqueda ? { etiqueta: 'Limpiar búsqueda', onClick: () => cambiarBusqueda('') } : undefined}
+              />
+            ) : (
+              <>
+                <div className="divide-y divide-slate-100 lg:hidden">
+                  {equiposPagina.map((equipo) => {
                     const ambiente = ambientes.find((item) => item.id === equipo.ambiente_id)
                     return (
-                      <tr key={equipo.id} className="border-t">
-                        <td className="px-4 py-3 font-semibold text-blue-800">{equipo.codigo_institucional}</td>
-                        <td className="px-4 py-3">{equipo.nombre}<p className="text-xs text-slate-500">{equipo.marca ?? ''} {equipo.modelo ?? ''}</p></td>
-                        <td className="px-4 py-3">{ambiente ? `${ambiente.codigo} — ${ambiente.nombre}` : '—'}</td>
-                        <td className="px-4 py-3">{etiquetaEstado[equipo.estado_operativo] ?? equipo.estado_operativo}</td>
-                        <td className="px-4 py-3"><button type="button" onClick={() => setFicha(equipo)} className="text-blue-700 underline">Ver equipo</button></td>
-                      </tr>
+                      <article key={equipo.id} className="min-w-0 space-y-2 p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="break-all text-sm font-bold text-blue-800">{equipo.codigo_institucional}</p>
+                            <h4 className="mt-0.5 break-words font-semibold text-slate-900">{equipo.nombre}</h4>
+                          </div>
+                          <EstadoEquipoBadge estado={equipo.estado_operativo} situacion={equipo.situacion} />
+                        </div>
+                        <p className="break-all text-xs text-slate-700"><span className="font-semibold">Serie:</span> {equipo.numero_serie ?? 'Sin serie'}</p>
+                        <p className="break-words text-xs text-slate-500">{equipo.marca ?? 'Sin marca'} · {equipo.modelo ?? 'Sin modelo'}</p>
+                        <p className="break-words text-xs text-slate-600">{ambiente ? `${ambiente.codigo} — ${ambiente.nombre}` : 'Sin ambiente'}</p>
+                        <button type="button" onClick={() => setFicha(equipo)} className="min-h-10 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-blue-800 hover:bg-slate-50">Ver equipo</button>
+                      </article>
                     )
                   })}
-                  {equiposVisibles.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500">No se encontraron equipos</td></tr>}
-                </tbody>
-              </table>
-            </div>
+                </div>
+
+                <div className="hidden lg:block">
+                  <table className="w-full table-fixed text-left text-sm">
+                    <colgroup>
+                      <col className="w-40" />
+                      <col />
+                      <col className="w-48" />
+                      <col className="w-36" />
+                      <col className="w-28" />
+                    </colgroup>
+                    <thead className="bg-slate-50 text-slate-600">
+                      <tr>
+                        <th scope="col" className="px-4 py-3">Código</th>
+                        <th scope="col" className="px-4 py-3">Equipo</th>
+                        <th scope="col" className="px-4 py-3">Ambiente</th>
+                        <th scope="col" className="px-4 py-3">Estado</th>
+                        <th scope="col" className="px-4 py-3">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {equiposPagina.map((equipo) => {
+                        const ambiente = ambientes.find((item) => item.id === equipo.ambiente_id)
+                        return (
+                          <tr key={equipo.id} className="border-t align-top">
+                            <td className="min-w-0 px-4 py-3 font-semibold text-blue-800"><span className="break-all">{equipo.codigo_institucional}</span></td>
+                            <td className="min-w-0 px-4 py-3">
+                              <p className="break-words font-medium text-slate-900">{equipo.nombre}</p>
+                              <p className="mt-0.5 break-all text-xs text-slate-700">Serie: {equipo.numero_serie ?? 'Sin serie'}</p>
+                              <p className="mt-0.5 break-words text-xs text-slate-500">{equipo.marca ?? 'Sin marca'} · {equipo.modelo ?? 'Sin modelo'}</p>
+                            </td>
+                            <td className="min-w-0 px-4 py-3"><span className="break-words">{ambiente ? `${ambiente.codigo} — ${ambiente.nombre}` : '—'}</span></td>
+                            <td className="px-4 py-3"><EstadoEquipoBadge estado={equipo.estado_operativo} situacion={equipo.situacion} /></td>
+                            <td className="px-4 py-3"><button type="button" onClick={() => setFicha(equipo)} className="min-h-9 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-blue-800 hover:bg-slate-50">Ver equipo</button></td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="border-t border-slate-100 p-3">
+                  <Paginacion
+                    rango={rangoEquipos}
+                    porPagina={porPaginaEquipos}
+                    cargando={cargando}
+                    sustantivo="equipos"
+                    onCambiarPagina={setPaginaEquipos}
+                    onCambiarPorPagina={(nuevo) => {
+                      setPorPaginaEquipos(normalizarPorPagina(nuevo))
+                      setPaginaEquipos(1)
+                    }}
+                  />
+                </div>
+              </>
+            )}
           </section>
         </>
       )}

@@ -49,9 +49,23 @@ test('nombre y código quedan consecutivos y fuera de las ondas', () => {
     const finNombre = ajuste.nombreY + ajuste.nombre.lineas.length * ajuste.nombre.interlineado
     assert.equal(ajuste.codigoY - finNombre, 12)
     assert.ok(ajuste.codigoY + ajuste.codigo.lineas.length * ajuste.codigo.interlineado <= 341)
+    assert.ok(ajuste.serieY + ajuste.serie.lineas.length * ajuste.serie.interlineado <= 341)
     assert.equal(ajuste.nombre.lineas.join('').replace(/\s/g, ''), `NOMBRE:${nombre}`.replace(/\s/g, ''))
   }
   assert.throws(() => crearFormatoEtiquetas(100), /altura/)
+})
+
+test('la etiqueta muestra la serie real o el respaldo Sin serie', () => {
+  const medir = (texto, tamano) => texto.length * tamano * 0.7
+  const conSerie = ajustarDatosEtiqueta('Laptop', 'INV-2026-001', 420, medir, ' SN-Á 001 ')
+  assert.equal(conSerie.serie.lineas.join(' ').replace(/\s+/g, ' '), 'SERIE: SN-Á 001')
+  assert.ok(Math.abs(conSerie.serieY - (conSerie.codigoY + conSerie.codigo.lineas.length * conSerie.codigo.interlineado) - 12) < 1e-9)
+  assert.ok(conSerie.serieY + conSerie.serie.lineas.length * conSerie.serie.interlineado <= 341)
+
+  for (const valor of [undefined, null, '', '   ']) {
+    const sinSerie = ajustarDatosEtiqueta('Laptop', 'INV-2026-001', 420, medir, valor)
+    assert.equal(sinSerie.serie.lineas.join(' ').replace(/\s+/g, ' '), 'SERIE: Sin serie')
+  }
 })
 
 test('ajusta nombres largos y códigos continuos sin truncar el contenido', () => {

@@ -3,6 +3,25 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { Link, useSearchParams } from 'react-router-dom'
 import EquipoQrDialog from '../components/EquipoQrDialog'
 import ConfirmarEliminacionEquipo from '../components/ConfirmarEliminacionEquipo'
+import EstadoEquipoBadge from '../components/EstadoEquipoBadge'
+import EstadoVacio from '../components/EstadoVacio'
+import Paginacion from '../components/Paginacion'
+import { useDebouncedValue } from '../hooks/useDebouncedValue'
+import {
+  calcularRangoVisible,
+  calcularTotalPaginas,
+  normalizarPorPagina,
+  POR_PAGINA_PREDETERMINADO,
+  type PorPagina,
+} from '../utils/paginacion'
+import {
+  contarFiltrosActivos,
+  idsAmbientesDeSeleccion,
+  opcionesAmbiente,
+  opcionesPabellon,
+  opcionesPiso,
+  resolverSeleccionUbicacion,
+} from '../utils/filtrosEquipos'
 import { listarHistorialMovimientos, type Movimiento } from '../services/movimientosService'
 import { listarMantenimientos, type Mantenimiento } from '../services/mantenimientosService'
 import { usePermissions } from '../hooks/usePermissions'
@@ -21,6 +40,7 @@ import {
   listarOpcionesRelacion,
   listarEquipos,
   obtenerDatosDetalleEquipo,
+  type OrdenEquipos,
   obtenerEquipo,
   obtenerFotografiasEquipo,
   posiblesDuplicados,
@@ -39,8 +59,17 @@ import {
   type UbicacionEquipo,
 } from '../services/equiposService'
 
-const porPagina = 12
-const registrosRecientes = 10
+const ordenesEquipos: { valor: OrdenEquipos; etiqueta: string }[] = [
+  { valor: 'reciente', etiqueta: 'Más recientes' },
+  { valor: 'codigo', etiqueta: 'Código institucional' },
+  { valor: 'nombre', etiqueta: 'Nombre del equipo' },
+  { valor: 'estado', etiqueta: 'Estado operativo' },
+]
+
+function esOrdenEquipos(valor: string | null): valor is OrdenEquipos {
+  return ordenesEquipos.some((opcion) => opcion.valor === valor)
+}
+
 const etiquetasEstado: Record<EstadoOperativo, string> = {
   operativo: 'Operativo',
   con_fallas: 'Operativo con observaciones',
@@ -101,6 +130,30 @@ function formatoPeso(bytes: number) {
     : `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+function ChipFiltro({
+  etiqueta,
+  onQuitar,
+}: {
+  etiqueta: string
+  onQuitar: () => void
+}) {
+  return (
+    <span className="inline-flex max-w-full items-center gap-1 rounded-full border border-orange-200 bg-orange-50 py-1 pl-3 pr-1 text-xs font-medium text-orange-900">
+      <span className="min-w-0 break-words">{etiqueta}</span>
+      <button
+        type="button"
+        onClick={onQuitar}
+        aria-label={`Quitar filtro ${etiqueta}`}
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-orange-800 transition hover:bg-orange-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500"
+      >
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" className="h-3.5 w-3.5">
+          <path d="m7 7 10 10M17 7 7 17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      </button>
+    </span>
+  )
+}
+
 export default function Equipos() {
   const { can } = usePermissions()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -111,25 +164,45 @@ export default function Equipos() {
   const puedeVerMantenimientos = can('mantenimientos.ver')
   const puedeVerMovimientos = can('movimientos.ver')
   const [categorias, setCategorias] = useState<Categoria[]>([])
+  const [catalogosListos, setCatalogosListos] = useState(false)
   const [erroresCampos, setErroresCampos] = useState<ReturnType<typeof validarEquipo>>({})
   const [ambientes, setAmbientes] = useState<Ambiente[]>([])
   const [responsables, setResponsables] = useState<Responsable[]>([])
   const [equipos, setEquipos] = useState<Equipo[]>([])
   const [total, setTotal] = useState(0)
   const [actualizacion, setActualizacion] = useState(0)
-  const [pagina, setPagina] = useState(1)
-  const [verHistorialCompleto, setVerHistorialCompleto] = useState(false)
-  const verEquiposDadosDeBaja = searchParams.get('estado') === 'baja'
-  const [busqueda, setBusqueda] = useState('')
-  const [estado, setEstado] = useState(() => {
-    const estadoInicial = searchParams.get('estado') ?? ''
-    return estadoInicial === 'baja' ? '' : estadoInicial
+  const [pagina, setPagina] = useState(() => {
+    const valor = Number(searchParams.get('pagina'))
+    return Number.isFinite(valor) && valor >= 1 ? Math.floor(valor) : 1
   })
+  const [porPagina, setPorPagina] = useState<PorPagina>(() =>
+    normalizarPorPagina(searchParams.get('porPagina')),
+  )
+  const [orden, setOrden] = useState<OrdenEquipos>(() => {
+    const desdeUrl = searchParams.get('orden')
+    if (esOrdenEquipos(desdeUrl)) return desdeUrl
+    return searchParams.get('historial') === 'completo' ? 'codigo' : 'reciente'
+  })
+  const [busqueda, setBusqueda] = useState(() => searchParams.get('busqueda') ?? '')
+  const busquedaDiferida = useDebouncedValue(busqueda, 300)
+  const [estado, setEstado] = useState(() => searchParams.get('estado') ?? '')
+  const verEquiposDadosDeBaja = estado === 'baja'
   const [categoriaFiltro, setCategoriaFiltro] = useState(() => searchParams.get('categoria') ?? '')
+  const [pabellonFiltro, setPabellonFiltro] = useState(() => searchParams.get('pabellon') ?? '')
+  const [pisoFiltro, setPisoFiltro] = useState(() => searchParams.get('piso') ?? '')
   const [ambienteFiltro, setAmbienteFiltro] = useState(() => searchParams.get('ambiente') ?? '')
   const [ambienteFiltrosIds, setAmbienteFiltrosIds] = useState(() => searchParams.getAll('ambientes'))
   const [sinUbicacionFiltro, setSinUbicacionFiltro] = useState(() => searchParams.get('sinUbicacion') === 'true')
-  const [cargando, setCargando] = useState(true)
+  const [mostrarMasFiltros, setMostrarMasFiltros] = useState(
+    () =>
+      Boolean(
+        searchParams.get('pabellon') ||
+          searchParams.get('piso') ||
+          searchParams.get('ambiente'),
+      ),
+  )
+  const [claveListado, setClaveListado] = useState('')
+  const [errorListado, setErrorListado] = useState('')
   const [error, setError] = useState('')
   const [aviso, setAviso] = useState('')
   const [modalAbierto, setModalAbierto] = useState(false)
@@ -171,6 +244,7 @@ export default function Equipos() {
   const solicitudDetalle = useRef(0)
   const solicitudFotografias = useRef(0)
   const solicitudEdicion = useRef(0)
+  const solicitudListado = useRef(0)
   const componenteMontado = useRef(false)
   const equipoDetalleIdActual = useRef<string | null>(null)
   const equipoEdicionIdActual = useRef<string | null>(null)
@@ -242,6 +316,7 @@ export default function Equipos() {
         setCategorias(catalogos.categorias)
         setAmbientes(catalogos.ambientes)
         setResponsables(catalogos.responsables)
+        setCatalogosListos(true)
       })
       .catch((e: unknown) => {
         if (vigente) setError(mostrarError(e, 'No se pudieron cargar los catálogos.'))
@@ -251,41 +326,196 @@ export default function Equipos() {
     }
   }, [])
 
+  const seleccionUbicacion = useMemo(
+    () =>
+      resolverSeleccionUbicacion(
+        {
+          pabellon: pabellonFiltro,
+          piso: pisoFiltro,
+          ambiente: ambienteFiltro,
+        },
+        ambientes,
+      ),
+    [pabellonFiltro, pisoFiltro, ambienteFiltro, ambientes],
+  )
+  const pabellonesDisponibles = useMemo(
+    () => opcionesPabellon(ambientes),
+    [ambientes],
+  )
+  const pisosDisponibles = useMemo(
+    () => opcionesPiso(ambientes, seleccionUbicacion.pabellon),
+    [ambientes, seleccionUbicacion.pabellon],
+  )
+  const ambientesDisponibles = useMemo(
+    () => opcionesAmbiente(ambientes, seleccionUbicacion.piso),
+    [ambientes, seleccionUbicacion.piso],
+  )
+  const idsUbicacion = useMemo(() => {
+    if (seleccionUbicacion.pabellon) {
+      return idsAmbientesDeSeleccion(seleccionUbicacion, ambientes)
+    }
+    return ambienteFiltrosIds.length ? ambienteFiltrosIds : undefined
+  }, [seleccionUbicacion, ambientes, ambienteFiltrosIds])
+
+  const claveConsulta = useMemo(
+    () =>
+      JSON.stringify([
+        pagina,
+        porPagina,
+        orden,
+        busquedaDiferida.trim(),
+        estado,
+        verEquiposDadosDeBaja,
+        categoriaFiltro,
+        seleccionUbicacion.pabellon,
+        seleccionUbicacion.piso,
+        seleccionUbicacion.ambiente,
+        idsUbicacion,
+        sinUbicacionFiltro,
+        actualizacion,
+      ]),
+    [
+      pagina,
+      porPagina,
+      orden,
+      busquedaDiferida,
+      estado,
+      verEquiposDadosDeBaja,
+      categoriaFiltro,
+      seleccionUbicacion,
+      idsUbicacion,
+      sinUbicacionFiltro,
+      actualizacion,
+    ],
+  )
+  // La carga se deriva de la consulta vigente: al cambiar cualquier filtro
+  // la clave deja de coincidir y la tabla muestra su estado de actualización.
+  const cargando = claveListado !== claveConsulta
+
   useEffect(() => {
     let vigente = true
+    const solicitud = ++solicitudListado.current
     listarEquipos({
       pagina,
-      porPagina: verHistorialCompleto || verEquiposDadosDeBaja ? porPagina : registrosRecientes,
-      busqueda,
+      porPagina,
+      busqueda: busquedaDiferida.trim(),
       estado: verEquiposDadosDeBaja ? '' : estado,
       situacion: verEquiposDadosDeBaja
         ? 'baja'
         : estado === 'archivado'
           ? 'archivado'
-          : 'activo',
+          : estado
+            ? undefined
+            : 'activo',
       categoriaId: categoriaFiltro,
-      ambienteId: ambienteFiltro,
-      ambienteIds: ambienteFiltrosIds.length ? ambienteFiltrosIds : undefined,
+      ambienteId: seleccionUbicacion.ambiente,
+      ambienteIds: idsUbicacion,
       sinUbicacion: sinUbicacionFiltro,
-      ordenReciente: !verHistorialCompleto && !verEquiposDadosDeBaja,
+      orden,
     })
       .then((resultado) => {
-        if (!vigente) return
+        if (!vigente || solicitud !== solicitudListado.current) return
+        const totalPaginas = calcularTotalPaginas(resultado.total, porPagina)
+        if (pagina > totalPaginas) {
+          setPagina(totalPaginas)
+          return
+        }
         setEquipos(resultado.equipos)
         setTotal(resultado.total)
+        setErrorListado('')
+        setClaveListado(claveConsulta)
       })
       .catch((e: unknown) => {
-        if (vigente) setError(mostrarError(e, 'No se pudo cargar el inventario.'))
-      })
-      .finally(() => {
-        if (vigente) setCargando(false)
+        if (!vigente || solicitud !== solicitudListado.current) return
+        setErrorListado(mostrarError(e, 'No se pudo cargar el inventario.'))
+        setEquipos([])
+        setTotal(0)
+        setClaveListado(claveConsulta)
       })
     return () => {
       vigente = false
     }
-  }, [pagina, busqueda, estado, categoriaFiltro, ambienteFiltro, ambienteFiltrosIds, sinUbicacionFiltro, actualizacion, verHistorialCompleto, verEquiposDadosDeBaja])
+  }, [
+    claveConsulta,
+    pagina,
+    porPagina,
+    orden,
+    busquedaDiferida,
+    estado,
+    verEquiposDadosDeBaja,
+    categoriaFiltro,
+    seleccionUbicacion,
+    idsUbicacion,
+    sinUbicacionFiltro,
+    actualizacion,
+  ])
 
-  const paginas = Math.max(1, Math.ceil(total / porPagina))
+  // Mantiene la URL sincronizada para que el dashboard y los enlaces
+  // compartidos reproduzcan la misma vista y los mismos filtros.
+  useEffect(() => {
+    // Espera al catálogo para no borrar selecciones de ubicación que todavía
+    // no se pueden resolver (por ejemplo, enlaces del dashboard).
+    if (!catalogosListos) return
+    setSearchParams(
+      (actuales) => {
+        const parametros = new URLSearchParams(actuales)
+        const asignar = (clave: string, valor: string) => {
+          if (valor) parametros.set(clave, valor)
+          else parametros.delete(clave)
+        }
+        asignar('busqueda', busqueda.trim())
+        asignar('estado', estado)
+        asignar('categoria', categoriaFiltro)
+        asignar('pabellon', seleccionUbicacion.pabellon)
+        asignar('piso', seleccionUbicacion.piso)
+        asignar('ambiente', seleccionUbicacion.ambiente)
+        asignar(
+          'porPagina',
+          porPagina === POR_PAGINA_PREDETERMINADO ? '' : String(porPagina),
+        )
+        asignar('pagina', pagina > 1 ? String(pagina) : '')
+        asignar('orden', orden === 'reciente' ? '' : orden)
+        asignar('sinUbicacion', sinUbicacionFiltro ? 'true' : '')
+        parametros.delete('historial')
+        parametros.delete('ambientes')
+        for (const id of ambienteFiltrosIds) parametros.append('ambientes', id)
+        return parametros
+      },
+      { replace: true },
+    )
+  }, [
+    busqueda,
+    estado,
+    categoriaFiltro,
+    seleccionUbicacion,
+    porPagina,
+    pagina,
+    orden,
+    ambienteFiltrosIds,
+    sinUbicacionFiltro,
+    catalogosListos,
+    setSearchParams,
+  ])
+
+  const rangoVisible = calcularRangoVisible(pagina, porPagina, total)
+  const filtrosActivos = contarFiltrosActivos({
+    busqueda,
+    estado: verEquiposDadosDeBaja ? '' : estado,
+    categoria: categoriaFiltro,
+    pabellon: seleccionUbicacion.pabellon,
+    piso: seleccionUbicacion.piso,
+    ambiente: seleccionUbicacion.ambiente,
+    sinUbicacion: sinUbicacionFiltro,
+    ambientesDashboard: ambienteFiltrosIds,
+  })
+  const filtrosAplicados =
+    Boolean(busqueda.trim()) ||
+    Boolean(estado && !verEquiposDadosDeBaja) ||
+    Boolean(categoriaFiltro) ||
+    Boolean(seleccionUbicacion.pabellon) ||
+    sinUbicacionFiltro ||
+    ambienteFiltrosIds.length > 0
+
   const categoriasPorId = useMemo(
     () => new Map(categorias.map((categoria) => [categoria.id, categoria.nombre])),
     [categorias],
@@ -341,24 +571,47 @@ export default function Equipos() {
       setSearchParams(parametros, { replace: true })
     }
   }, [searchParams, setSearchParams])
-  const seleccionarVistaEquipos = useCallback(
-    (verDadosDeBaja: boolean) => {
-      setPagina(1)
-      setSearchParams(
-        (actuales) => {
-          const parametros = new URLSearchParams(actuales)
-          if (verDadosDeBaja) {
-            parametros.set('estado', 'baja')
-          } else if (parametros.get('estado') === 'baja') {
-            parametros.delete('estado')
-          }
-          return parametros
-        },
-        { replace: true },
-      )
-    },
-    [setSearchParams],
-  )
+  const seleccionarVistaEquipos = useCallback((verDadosDeBaja: boolean) => {
+    setPagina(1)
+    setEstado(verDadosDeBaja ? 'baja' : '')
+  }, [])
+
+  function cambiarPabellon(valor: string) {
+    setPabellonFiltro(valor)
+    setPisoFiltro('')
+    setAmbienteFiltro('')
+    setAmbienteFiltrosIds([])
+    setSinUbicacionFiltro(false)
+    setPagina(1)
+  }
+
+  function cambiarPiso(valor: string) {
+    setPisoFiltro(valor)
+    setAmbienteFiltro('')
+    setAmbienteFiltrosIds([])
+    setSinUbicacionFiltro(false)
+    setPagina(1)
+  }
+
+  function cambiarAmbiente(valor: string) {
+    setAmbienteFiltro(valor)
+    setAmbienteFiltrosIds([])
+    setSinUbicacionFiltro(false)
+    setPagina(1)
+  }
+
+  function limpiarFiltros() {
+    setBusqueda('')
+    // Conserva la vista de equipos dados de baja al limpiar los criterios.
+    setEstado((actual) => (actual === 'baja' ? 'baja' : ''))
+    setCategoriaFiltro('')
+    setPabellonFiltro('')
+    setPisoFiltro('')
+    setAmbienteFiltro('')
+    setAmbienteFiltrosIds([])
+    setSinUbicacionFiltro(false)
+    setPagina(1)
+  }
 
   function crearVistaArchivo(archivo: File): ArchivoConVista {
     const vista = URL.createObjectURL(archivo)
@@ -1033,7 +1286,7 @@ export default function Equipos() {
             <button
               type="button"
               onClick={iniciarNuevo}
-              className="rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500"
+              className="rounded-lg bg-orange-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500"
             >
               Nuevo equipo
             </button>
@@ -1051,191 +1304,383 @@ export default function Equipos() {
           {aviso}
         </p>
       )}
-      <div role="tablist" aria-label="Situación de los equipos" className="flex flex-wrap gap-2">
+      <div role="group" aria-label="Situación de los equipos" className="flex flex-wrap gap-2">
         <button
           type="button"
-          role="tab"
-          aria-selected={!verEquiposDadosDeBaja}
+          aria-pressed={!verEquiposDadosDeBaja}
           onClick={() => seleccionarVistaEquipos(false)}
-          className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
+          className={`min-h-11 rounded-lg px-4 py-2 text-sm font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500 ${
             !verEquiposDadosDeBaja
-              ? 'bg-orange-500 text-white shadow-sm'
-              : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+              ? 'bg-orange-700 text-white shadow-sm'
+              : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
           }`}
         >
           Inventario
         </button>
         <button
           type="button"
-          role="tab"
-          aria-selected={verEquiposDadosDeBaja}
+          aria-pressed={verEquiposDadosDeBaja}
           onClick={() => seleccionarVistaEquipos(true)}
-          className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
+          className={`min-h-11 rounded-lg px-4 py-2 text-sm font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500 ${
             verEquiposDadosDeBaja
-              ? 'bg-orange-500 text-white shadow-sm'
-              : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+              ? 'bg-orange-700 text-white shadow-sm'
+              : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
           }`}
         >
           Equipos dados de baja
         </button>
       </div>
-      <div className="mt-5 grid min-w-0 gap-3 rounded-xl bg-white p-3 shadow sm:grid-cols-2 sm:p-4 lg:grid-cols-4">
-        <input
-          type="search"
-          value={busqueda}
-          onChange={(event) => {
-            setBusqueda(event.target.value)
-            setPagina(1)
-          }}
-          placeholder="Código, serie, marca o equipo"
-          aria-label="Buscar en inventario"
-          className="min-w-0 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"
-        />
-        <select
-          value={categoriaFiltro}
-          onChange={(event) => {
-            setCategoriaFiltro(event.target.value)
-            setPagina(1)
-          }}
-          aria-label="Filtrar por categoría"
-          className="min-w-0 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"
-        >
-          <option value="">Todas las categorías</option>
-          {categorias.map((categoria) => (
-            <option key={categoria.id} value={categoria.id}>{categoria.nombre}</option>
-          ))}
-        </select>
-        <select
-          value={ambienteFiltro}
-          onChange={(event) => {
-            setAmbienteFiltro(event.target.value)
-            setAmbienteFiltrosIds([])
-            setSinUbicacionFiltro(false)
-            setPagina(1)
-          }}
-          aria-label="Filtrar por ubicación"
-          className="min-w-0 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"
-        >
-          <option value="">Todas las ubicaciones</option>
-          {ambientes.map((ambiente) => (
-            <option key={ambiente.id} value={ambiente.id}>
-              {ambiente.pabellon} / {ambiente.piso} / {ambiente.codigo} — {ambiente.nombre}
-            </option>
-          ))}
-        </select>
-        <select
-          value={verEquiposDadosDeBaja ? 'baja' : estado}
-          disabled={verEquiposDadosDeBaja}
-          onChange={(event) => {
-            setEstado(event.target.value)
-            setPagina(1)
-          }}
-          aria-label="Filtrar por estado"
-          className="min-w-0 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"
-        >
-          {verEquiposDadosDeBaja
-            ? <option value="baja">Equipos dados de baja</option>
-            : <option value="">Todos los equipos activos</option>}
-          {estadosOperativos.map((opcion) => (
-            <option key={opcion} value={opcion}>{etiquetasEstado[opcion]}</option>
-          ))}
-          {!verEquiposDadosDeBaja && <option value="archivado">Archivado</option>}
-        </select>
-      </div>
+      <div className="mt-5 min-w-0 rounded-xl bg-white p-3 shadow sm:p-4">
+        <div className="grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
+          <div className="min-w-0">
+            <label htmlFor="buscar-equipos" className="sr-only">
+              Buscar en inventario
+            </label>
+            <div className="relative">
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 24 24"
+                fill="none"
+                className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400"
+              >
+                <circle cx="10.5" cy="10.5" r="6.5" stroke="currentColor" strokeWidth="1.8" />
+                <path d="m15.5 15.5 4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+              </svg>
+              <input
+                id="buscar-equipos"
+                type="search"
+                value={busqueda}
+                onChange={(event) => {
+                  setBusqueda(event.target.value)
+                  setPagina(1)
+                }}
+                placeholder="Código, nombre, serie, marca, modelo o patrimonial"
+                className="min-h-11 w-full rounded-lg border border-slate-300 bg-white py-2.5 pl-10 pr-10 text-sm text-slate-800 placeholder:text-slate-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500"
+              />
+              {busqueda && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setBusqueda('')
+                    setPagina(1)
+                  }}
+                  aria-label="Limpiar búsqueda"
+                  className="absolute right-1 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500"
+                >
+                  <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" className="h-4 w-4">
+                    <path d="m7 7 10 10M17 7 7 17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                  </svg>
+                </button>
+              )}
+            </div>
+          </div>
 
-      {(ambienteFiltrosIds.length > 0 || sinUbicacionFiltro) && (
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-900">
-          <span>
-            {sinUbicacionFiltro
-              ? 'Equipos sin ubicación asignada'
-              : `Inventario filtrado por ${ambienteFiltrosIds.length} ambiente(s) del dashboard`}
-          </span>
+          <label className="min-w-0 text-sm font-medium text-slate-700">
+            Estado
+            <select
+              value={verEquiposDadosDeBaja ? 'baja' : estado}
+              disabled={verEquiposDadosDeBaja}
+              onChange={(event) => {
+                setEstado(event.target.value)
+                setPagina(1)
+              }}
+              className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500 disabled:bg-slate-100 disabled:text-slate-600"
+            >
+              {verEquiposDadosDeBaja
+                ? <option value="baja">Equipos dados de baja</option>
+                : <option value="">Todos los equipos activos</option>}
+              {estadosOperativos.map((opcion) => (
+                <option key={opcion} value={opcion}>{etiquetasEstado[opcion]}</option>
+              ))}
+              {!verEquiposDadosDeBaja && <option value="archivado">Archivado</option>}
+            </select>
+          </label>
+
+          <label className="min-w-0 text-sm font-medium text-slate-700">
+            Categoría
+            <select
+              value={categoriaFiltro}
+              onChange={(event) => {
+                setCategoriaFiltro(event.target.value)
+                setPagina(1)
+              }}
+              className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500"
+            >
+              <option value="">Todas las categorías</option>
+              {categorias.map((categoria) => (
+                <option key={categoria.id} value={categoria.id}>{categoria.nombre}</option>
+              ))}
+            </select>
+          </label>
+
           <button
             type="button"
-            onClick={() => {
-              setAmbienteFiltrosIds([])
-              setSinUbicacionFiltro(false)
-              setPagina(1)
-            }}
-            className="font-semibold text-orange-800 hover:underline"
+            onClick={() => setMostrarMasFiltros((actual) => !actual)}
+            aria-expanded={mostrarMasFiltros}
+            aria-controls="filtros-ubicacion"
+            className="flex min-h-11 items-center justify-center gap-2 self-end rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500"
           >
-            Quitar filtro
+            Más filtros
+            {filtrosActivos > 0 && (
+              <span className="inline-flex min-w-6 items-center justify-center rounded-full bg-orange-700 px-1.5 py-0.5 text-xs font-bold text-white">
+                {filtrosActivos}
+                <span className="sr-only"> filtros activos</span>
+              </span>
+            )}
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" className={`h-4 w-4 transition ${mostrarMasFiltros ? 'rotate-180' : ''}`}>
+              <path d="m7 10 5 5 5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
           </button>
         </div>
-      )}
 
-      <div className="mt-4 min-w-0 overflow-hidden rounded-xl bg-white shadow">
-        <div className="flex flex-col items-stretch justify-between gap-3 border-b border-slate-100 px-3 py-3 sm:flex-row sm:items-center sm:px-4">
-          <h2 className="min-w-0 font-semibold text-slate-800">
-            {verEquiposDadosDeBaja
-              ? 'Equipos dados de baja'
-              : verHistorialCompleto
-                ? 'Historial completo de equipos'
-                : 'Últimos equipos registrados'}
-          </h2>
-          {!verEquiposDadosDeBaja && (
+        {mostrarMasFiltros && (
+          <div id="filtros-ubicacion" className="mt-3 grid min-w-0 gap-3 border-t border-slate-100 pt-3 sm:grid-cols-3">
+            <label className="min-w-0 text-sm font-medium text-slate-700">
+              Pabellón
+              <select
+                value={seleccionUbicacion.pabellon}
+                onChange={(event) => cambiarPabellon(event.target.value)}
+                className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500"
+              >
+                <option value="">Todos los pabellones</option>
+                {pabellonesDisponibles.map((opcion) => (
+                  <option key={opcion.id} value={opcion.id}>{opcion.nombre}</option>
+                ))}
+              </select>
+            </label>
+            <label className="min-w-0 text-sm font-medium text-slate-700">
+              Piso
+              <select
+                value={seleccionUbicacion.piso}
+                disabled={!seleccionUbicacion.pabellon}
+                onChange={(event) => cambiarPiso(event.target.value)}
+                className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500 disabled:bg-slate-100 disabled:text-slate-500"
+              >
+                <option value="">Todos los pisos</option>
+                {pisosDisponibles.map((opcion) => (
+                  <option key={opcion.id} value={opcion.id}>{opcion.nombre}</option>
+                ))}
+              </select>
+            </label>
+            <label className="min-w-0 text-sm font-medium text-slate-700">
+              Ambiente
+              <select
+                value={seleccionUbicacion.ambiente}
+                disabled={!seleccionUbicacion.piso}
+                onChange={(event) => cambiarAmbiente(event.target.value)}
+                className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500 disabled:bg-slate-100 disabled:text-slate-500"
+              >
+                <option value="">Todos los ambientes</option>
+                {ambientesDisponibles.map((opcion) => (
+                  <option key={opcion.id} value={opcion.id}>{opcion.codigo} — {opcion.nombre}</option>
+                ))}
+              </select>
+            </label>
+            <p className="text-xs text-slate-500 sm:col-span-3">
+              El piso depende del pabellón y el ambiente del piso. Al cambiar un nivel se limpian las selecciones inferiores.
+            </p>
+          </div>
+        )}
+
+        {filtrosActivos > 0 && (
+          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
+            <span className="text-sm font-medium text-slate-700">Filtros activos:</span>
+            {busqueda.trim() && (
+              <ChipFiltro
+                etiqueta={`Búsqueda: “${busqueda.trim()}”`}
+                onQuitar={() => {
+                  setBusqueda('')
+                  setPagina(1)
+                }}
+              />
+            )}
+            {estado && !verEquiposDadosDeBaja && (
+              <ChipFiltro
+                etiqueta={`Estado: ${estado === 'archivado' ? 'Archivado' : etiquetasEstado[estado as EstadoOperativo] ?? estado}`}
+                onQuitar={() => {
+                  setEstado('')
+                  setPagina(1)
+                }}
+              />
+            )}
+            {categoriaFiltro && (
+              <ChipFiltro
+                etiqueta={`Categoría: ${categoriasPorId.get(categoriaFiltro) ?? categoriaFiltro}`}
+                onQuitar={() => {
+                  setCategoriaFiltro('')
+                  setPagina(1)
+                }}
+              />
+            )}
+            {seleccionUbicacion.pabellon && (
+              <ChipFiltro
+                etiqueta={`Pabellón: ${pabellonesDisponibles.find((opcion) => opcion.id === seleccionUbicacion.pabellon)?.nombre ?? 'Seleccionado'}`}
+                onQuitar={() => cambiarPabellon('')}
+              />
+            )}
+            {seleccionUbicacion.piso && (
+              <ChipFiltro
+                etiqueta={`Piso: ${pisosDisponibles.find((opcion) => opcion.id === seleccionUbicacion.piso)?.nombre ?? 'Seleccionado'}`}
+                onQuitar={() => cambiarPiso('')}
+              />
+            )}
+            {seleccionUbicacion.ambiente && (
+              <ChipFiltro
+                etiqueta={`Ambiente: ${ambientesDisponibles.find((opcion) => opcion.id === seleccionUbicacion.ambiente)?.codigo ?? 'Seleccionado'}`}
+                onQuitar={() => cambiarAmbiente('')}
+              />
+            )}
+            {sinUbicacionFiltro && (
+              <ChipFiltro
+                etiqueta="Sin ubicación asignada"
+                onQuitar={() => {
+                  setSinUbicacionFiltro(false)
+                  setPagina(1)
+                }}
+              />
+            )}
+            {ambienteFiltrosIds.length > 0 && (
+              <ChipFiltro
+                etiqueta={`Dashboard: ${ambienteFiltrosIds.length} ambiente(s)`}
+                onQuitar={() => {
+                  setAmbienteFiltrosIds([])
+                  setSinUbicacionFiltro(false)
+                  setPagina(1)
+                }}
+              />
+            )}
             <button
               type="button"
-              onClick={() => {
-                setPagina(1)
-                setVerHistorialCompleto((actual) => !actual)
-              }}
-              className="w-full rounded-lg border border-blue-200 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 sm:w-auto"
+              onClick={limpiarFiltros}
+              className="ml-auto min-h-9 rounded-lg px-3 py-1.5 text-sm font-semibold text-orange-800 underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500"
             >
-              {verHistorialCompleto ? 'Ver últimos registros' : 'Ver historial completo'}
+              Limpiar filtros
             </button>
-          )}
+          </div>
+        )}
+      </div>
+
+      <div className="mt-4 min-w-0 overflow-hidden rounded-xl bg-white shadow" aria-busy={cargando}>
+        <div className="flex flex-col items-stretch justify-between gap-3 border-b border-slate-100 px-3 py-3 sm:flex-row sm:items-center sm:px-4">
+          <div className="min-w-0">
+            <h2 className="min-w-0 font-semibold text-slate-800">
+              {verEquiposDadosDeBaja ? 'Equipos dados de baja' : 'Equipos registrados'}
+            </h2>
+            <p className="mt-0.5 text-xs text-slate-500">
+              {cargando ? 'Actualizando resultados…' : `${total} resultado(s) encontrado(s)`}
+            </p>
+          </div>
+          <label className="flex shrink-0 flex-col gap-1 text-sm font-medium text-slate-700 sm:flex-row sm:items-center sm:gap-2">
+            Ordenar por
+            <select
+              value={orden}
+              onChange={(event) => {
+                const valor = event.target.value
+                if (!esOrdenEquipos(valor)) return
+                setOrden(valor)
+                setPagina(1)
+              }}
+              className="min-h-10 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500"
+            >
+              {ordenesEquipos.map((opcion) => (
+                <option key={opcion.valor} value={opcion.valor}>{opcion.etiqueta}</option>
+              ))}
+            </select>
+          </label>
         </div>
         <div className="flex flex-wrap items-center gap-3 border-b border-slate-100 bg-blue-50/50 px-4 py-3">
-          <label className="flex items-center gap-2 text-sm text-slate-700">
-            <input type="checkbox" disabled={cargando || !equipos.length} checked={equipos.length > 0 && equipos.every((equipo) => seleccionQr.has(equipo.id))} ref={(input) => { if (input) input.indeterminate = equipos.some((equipo) => seleccionQr.has(equipo.id)) && !equipos.every((equipo) => seleccionQr.has(equipo.id)) }} onChange={(event) => seleccionarPaginaEtiquetas(event.target.checked)} />
+          <label className="flex min-h-9 items-center gap-2 text-sm text-slate-700">
+            <input type="checkbox" className="h-4 w-4" disabled={cargando || !equipos.length} checked={equipos.length > 0 && equipos.every((equipo) => seleccionQr.has(equipo.id))} ref={(input) => { if (input) input.indeterminate = equipos.some((equipo) => seleccionQr.has(equipo.id)) && !equipos.every((equipo) => seleccionQr.has(equipo.id)) }} onChange={(event) => seleccionarPaginaEtiquetas(event.target.checked)} />
             Seleccionar esta página
           </label>
-          <span role="status" className="text-sm text-slate-600">{seleccionQr.size} equipo(s) seleccionado(s)</span>
-          <button type="button" disabled={!seleccionQr.size} onClick={() => setEquiposQr([...seleccionQr.values()].map((seleccionado) => equipos.find((actual) => actual.id === seleccionado.id) ?? seleccionado))} className="rounded-lg bg-blue-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">Vista previa e impresión masiva</button>
-          {seleccionQr.size > 0 && <button type="button" onClick={() => setSeleccionQr(new Map())} className="text-sm text-blue-800 underline">Limpiar selección</button>}
+          <span role="status" aria-live="polite" className="text-sm text-slate-600">{seleccionQr.size} equipo(s) seleccionado(s)</span>
+          <button type="button" disabled={!seleccionQr.size} onClick={() => setEquiposQr([...seleccionQr.values()].map((seleccionado) => equipos.find((actual) => actual.id === seleccionado.id) ?? seleccionado))} className="min-h-10 rounded-lg bg-blue-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">Vista previa e impresión masiva</button>
+          {seleccionQr.size > 0 && <button type="button" onClick={() => setSeleccionQr(new Map())} className="min-h-9 text-sm font-semibold text-blue-800 underline">Limpiar selección</button>}
           <p className="w-full text-xs text-slate-500">La selección se conserva al cambiar de página o aplicar filtros.</p>
         </div>
-        <div className="divide-y divide-slate-100 md:hidden">
-          {cargando && <p role="status" className="px-4 py-8 text-center text-sm text-slate-500">Cargando inventario...</p>}
-          {!cargando && equipos.length === 0 && <p className="px-4 py-8 text-center text-sm text-slate-500">No hay equipos para mostrar.</p>}
-          {!cargando && equipos.map((equipo) => {
+        {cargando && (
+          <p role="status" aria-live="polite" className="border-b border-slate-100 px-4 py-3 text-sm font-medium text-slate-600">
+            Actualizando inventario…
+          </p>
+        )}
+        {!cargando && errorListado && (
+          <p role="alert" className="mx-4 mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">
+            {errorListado}
+          </p>
+        )}
+        {!cargando && !errorListado && equipos.length === 0 && (
+          <EstadoVacio
+            tipo={filtrosAplicados ? 'filtro' : 'inventario'}
+            titulo={
+              filtrosAplicados
+                ? 'No encontramos equipos con esos criterios'
+                : verEquiposDadosDeBaja
+                  ? 'No hay equipos dados de baja'
+                  : 'Aún no hay equipos registrados'
+            }
+            descripcion={
+              filtrosAplicados
+                ? 'Revisa la ortografía o quita algunos filtros para ampliar la búsqueda.'
+                : verEquiposDadosDeBaja
+                  ? 'Los equipos que se den de baja aparecerán aquí y podrás reactivarlos o eliminarlos definitivamente.'
+                  : 'Registra el primer activo tecnológico para comenzar el inventario.'
+            }
+            accion={
+              filtrosAplicados
+                ? { etiqueta: 'Limpiar filtros', onClick: limpiarFiltros }
+                : puedeCrear
+                  ? { etiqueta: 'Registrar el primer equipo', onClick: iniciarNuevo }
+                  : undefined
+            }
+          />
+        )}
+        <div className="divide-y divide-slate-100 lg:hidden">
+          {equipos.map((equipo) => {
             const ambiente = equipo.ambiente_id ? ambientesPorId.get(equipo.ambiente_id) : null
             const deBaja = equipo.situacion !== 'activo'
             return (
               <article key={equipo.id} className="min-w-0 space-y-3 p-4">
-                <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={seleccionQr.has(equipo.id)} onChange={(event) => seleccionarEtiqueta(equipo, event.target.checked)} />Seleccionar para etiquetas</label>
-                <div className="flex min-w-0 items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="break-words text-sm font-bold text-orange-800">{equipo.codigo_institucional}</p>
-                    <h3 className="mt-0.5 break-words font-semibold text-slate-900">{equipo.nombre}</h3>
-                    <p className="mt-0.5 break-words text-xs text-slate-500">{equipo.modelo ?? 'Sin modelo'}</p>
-                  </div>
-                  <span className={`max-w-[45%] shrink-0 rounded-full px-2.5 py-1 text-center text-[11px] font-semibold leading-tight ${deBaja ? 'bg-slate-100 text-slate-700' : 'bg-emerald-50 text-emerald-800'}`}>
-                    {equipo.situacion === 'baja'
-                      ? 'Dado de baja'
-                      : equipo.situacion === 'archivado'
-                        ? 'Archivado'
-                        : etiquetasEstado[equipo.estado_operativo]}
-                  </span>
+                <div className="flex items-start justify-between gap-3">
+                  <label className="flex min-h-9 items-center gap-2 text-xs font-medium text-slate-600">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4"
+                      checked={seleccionQr.has(equipo.id)}
+                      onChange={(event) => seleccionarEtiqueta(equipo, event.target.checked)}
+                    />
+                    Etiqueta QR
+                  </label>
+                  <EstadoEquipoBadge estado={equipo.estado_operativo} situacion={equipo.situacion} />
                 </div>
-                <dl className="grid min-w-0 grid-cols-2 gap-x-3 gap-y-2 rounded-lg bg-slate-50 p-3 text-xs">
+                <div className="min-w-0">
+                  <p className="break-all text-sm font-bold text-blue-800">{equipo.codigo_institucional}</p>
+                  <h3 className="mt-0.5 break-words text-base font-semibold text-slate-900">{equipo.nombre}</h3>
+                  <p className="mt-1 break-all text-sm text-slate-700">
+                    <span className="font-semibold">Serie:</span> {equipo.numero_serie ?? 'Sin serie'}
+                  </p>
+                  <p className="mt-0.5 break-words text-xs text-slate-500">
+                    {equipo.marca ?? 'Sin marca'} · {equipo.modelo ?? 'Sin modelo'}
+                  </p>
+                </div>
+                <dl className="grid min-w-0 gap-2 rounded-lg bg-slate-50 p-3 text-xs sm:grid-cols-2">
                   <div className="min-w-0">
                     <dt className="text-slate-500">Categoría</dt>
                     <dd className="mt-0.5 break-words font-medium text-slate-800">{categoriasPorId.get(equipo.categoria_id) ?? '—'}</dd>
                   </div>
                   <div className="min-w-0">
-                    <dt className="text-slate-500">Serie / marca</dt>
-                    <dd className="mt-0.5 break-words font-medium text-slate-800">{equipo.numero_serie ?? 'Sin serie'} / {equipo.marca ?? 'Sin marca'}</dd>
-                  </div>
-                  <div className="col-span-2 min-w-0">
                     <dt className="text-slate-500">Ubicación</dt>
                     <dd className="mt-0.5 break-words font-medium text-slate-800">
                       {ambiente
-                        ? `${ambiente.pabellon} / ${ambiente.piso} / ${ambiente.codigo}${equipo.posicion ? ` · ${equipo.posicion}` : ''}`
+                        ? `${ambiente.pabellon} / ${ambiente.piso} / ${ambiente.codigo}`
                         : 'Sin ubicación'}
                     </dd>
                   </div>
+                  {equipo.posicion && (
+                    <div className="min-w-0 sm:col-span-2">
+                      <dt className="text-slate-500">Posición</dt>
+                      <dd className="mt-0.5 break-words font-medium text-slate-800">{equipo.posicion}</dd>
+                    </div>
+                  )}
                 </dl>
                 <div className="grid grid-cols-2 gap-2 min-[420px]:grid-cols-3">
                   <button type="button" onClick={() => setEquipoQr(equipo)} className="min-h-10 rounded-lg border border-orange-200 px-3 py-2 text-sm font-semibold text-orange-700 hover:bg-orange-50">QR</button>
@@ -1254,93 +1699,96 @@ export default function Equipos() {
             )
           })}
         </div>
-        <div className="hidden overflow-x-auto md:block">
-        <table className="w-full min-w-[900px] text-left text-sm">
-          <thead className="border-b bg-slate-50 text-slate-600">
-            <tr>
-              <th className="px-4 py-3"><span className="sr-only">Seleccionar para etiquetas</span></th>
-              <th className="px-4 py-3">Código / equipo</th>
-              <th className="px-4 py-3">Categoría</th>
-              <th className="px-4 py-3">Serie / marca</th>
-              <th className="px-4 py-3">Ubicación</th>
-              <th className="px-4 py-3">Estado</th>
-              <th className="px-4 py-3">Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            {cargando && (
-              <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500">Cargando inventario...</td></tr>
-            )}
-            {!cargando && equipos.length === 0 && (
-              <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500">No hay equipos para mostrar.</td></tr>
-            )}
-            {!cargando && equipos.map((equipo) => {
-              const ambiente = equipo.ambiente_id ? ambientesPorId.get(equipo.ambiente_id) : null
-              const deBaja = equipo.situacion !== 'activo'
-              return (
-                <tr key={equipo.id} className="border-b last:border-0">
-                  <td className="px-4 py-3"><input type="checkbox" aria-label={`Seleccionar ${equipo.codigo_institucional} para etiquetas`} checked={seleccionQr.has(equipo.id)} onChange={(event) => seleccionarEtiqueta(equipo, event.target.checked)} /></td>
-                  <td className="px-4 py-3">
-                    <p className="font-semibold text-blue-800">{equipo.codigo_institucional}</p>
-                    <p className="font-medium text-slate-800">{equipo.nombre}</p>
-                    <p className="text-xs text-slate-500">{equipo.modelo ?? 'Sin modelo'}</p>
-                  </td>
-                  <td className="px-4 py-3">{categoriasPorId.get(equipo.categoria_id) ?? '—'}</td>
-                  <td className="px-4 py-3">
-                    <p>{equipo.numero_serie ?? 'Sin serie'}</p>
-                    <p className="text-xs text-slate-500">{equipo.marca ?? 'Sin marca'}</p>
-                  </td>
-                  <td className="px-4 py-3">
-                    {ambiente
-                      ? `${ambiente.pabellon} / ${ambiente.piso} / ${ambiente.codigo}`
-                      : 'Sin ubicación'}
-                    {equipo.posicion && <p className="text-xs text-slate-500">{equipo.posicion}</p>}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={`rounded px-2 py-1 text-xs font-medium ${deBaja ? 'bg-slate-200 text-slate-700' : 'bg-green-100 text-green-800'}`}>
-                      {equipo.situacion === 'baja'
-                        ? 'Dado de baja'
-                        : equipo.situacion === 'archivado'
-                          ? 'Archivado'
-                          : etiquetasEstado[equipo.estado_operativo]}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex flex-wrap gap-2">
-                      <button type="button" onClick={() => setEquipoQr(equipo)} className="rounded border border-orange-200 px-3 py-1 font-semibold text-orange-700 hover:bg-orange-50">QR</button>
-                      <button type="button" onClick={() => void abrirDetalle(equipo)} className="rounded border border-slate-300 px-3 py-1 hover:bg-slate-50">Detalle</button>
-                      {puedeEditar && !deBaja && (
-                        <button type="button" onClick={() => void iniciarEdicion(equipo)} className="rounded border border-slate-300 px-3 py-1 hover:bg-slate-50">Editar</button>
-                      )}
-                      {puedeDarDeBaja && !deBaja && (
-                        <button type="button" onClick={() => void confirmarBaja(equipo)} className="rounded border border-red-200 px-3 py-1 text-red-700 hover:bg-red-50">Dar de baja</button>
-                      )}
-                      {puedeDarDeBaja && deBaja && (
-                        <button type="button" onClick={() => void reactivar(equipo)} className="rounded border border-green-200 px-3 py-1 text-green-700 hover:bg-green-50">Reactivar</button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
+        <div className="hidden lg:block">
+          <table className="w-full table-fixed text-left text-sm">
+            <colgroup>
+              <col className="w-12" />
+              <col />
+              <col className="w-44" />
+              <col className="w-36" />
+              <col className="w-52" />
+            </colgroup>
+            <thead className="border-b bg-slate-50 text-slate-600">
+              <tr>
+                <th scope="col" className="px-3 py-3"><span className="sr-only">Seleccionar para etiquetas</span></th>
+                <th scope="col" className="px-3 py-3">Equipo</th>
+                <th scope="col" className="px-3 py-3">Ubicación</th>
+                <th scope="col" className="px-3 py-3">Estado</th>
+                <th scope="col" className="px-3 py-3">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {equipos.map((equipo) => {
+                const ambiente = equipo.ambiente_id ? ambientesPorId.get(equipo.ambiente_id) : null
+                const deBaja = equipo.situacion !== 'activo'
+                return (
+                  <tr key={equipo.id} className="border-b last:border-0 align-top">
+                    <td className="px-3 py-4">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4"
+                        aria-label={`Seleccionar ${equipo.codigo_institucional} para etiquetas`}
+                        checked={seleccionQr.has(equipo.id)}
+                        onChange={(event) => seleccionarEtiqueta(equipo, event.target.checked)}
+                      />
+                    </td>
+                    <td className="min-w-0 px-3 py-4">
+                      <p className="break-all font-semibold text-blue-800">{equipo.codigo_institucional}</p>
+                      <p className="mt-0.5 break-words font-medium text-slate-900">{equipo.nombre}</p>
+                      <p className="mt-1 break-all text-xs text-slate-700">
+                        <span className="font-semibold">Serie:</span> {equipo.numero_serie ?? 'Sin serie'}
+                      </p>
+                      <p className="mt-0.5 break-words text-xs text-slate-500">
+                        {equipo.marca ?? 'Sin marca'} · {equipo.modelo ?? 'Sin modelo'}
+                      </p>
+                      <p className="mt-0.5 break-words text-xs text-slate-500">
+                        {categoriasPorId.get(equipo.categoria_id) ?? 'Sin categoría'}
+                      </p>
+                    </td>
+                    <td className="min-w-0 px-3 py-4 text-slate-700">
+                      <p className="break-words">
+                        {ambiente
+                          ? `${ambiente.pabellon} / ${ambiente.piso} / ${ambiente.codigo}`
+                          : 'Sin ubicación'}
+                      </p>
+                      {equipo.posicion && <p className="mt-0.5 break-words text-xs text-slate-500">{equipo.posicion}</p>}
+                    </td>
+                    <td className="px-3 py-4">
+                      <EstadoEquipoBadge estado={equipo.estado_operativo} situacion={equipo.situacion} />
+                    </td>
+                    <td className="px-3 py-4">
+                      <div className="flex flex-wrap gap-1.5">
+                        <button type="button" onClick={() => setEquipoQr(equipo)} className="min-h-9 rounded-lg border border-orange-200 px-3 py-1.5 text-sm font-semibold text-orange-700 hover:bg-orange-50">QR</button>
+                        <button type="button" onClick={() => void abrirDetalle(equipo)} className="min-h-9 rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50">Detalle</button>
+                        {puedeEditar && !deBaja && (
+                          <button type="button" onClick={() => void iniciarEdicion(equipo)} className="min-h-9 rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50">Editar</button>
+                        )}
+                        {puedeDarDeBaja && !deBaja && (
+                          <button type="button" onClick={() => void confirmarBaja(equipo)} className="min-h-9 rounded-lg border border-red-200 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50">Dar de baja</button>
+                        )}
+                        {puedeDarDeBaja && deBaja && (
+                          <button type="button" onClick={() => void reactivar(equipo)} className="min-h-9 rounded-lg border border-green-200 px-3 py-1.5 text-sm text-green-700 hover:bg-green-50">Reactivar</button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         </div>
       </div>
-      <div className="mt-3 flex flex-col items-start justify-between gap-3 text-sm text-slate-600 sm:flex-row sm:items-center">
-        <span>
-          {verHistorialCompleto ? total : Math.min(total, registrosRecientes)} de {total} equipos
-          {verHistorialCompleto ? ` · página ${pagina} de ${paginas}` : ' · más recientes'}
-        </span>
-        <div className="flex w-full gap-2 sm:w-auto sm:justify-end">
-          {verHistorialCompleto && (
-            <>
-              <button type="button" disabled={pagina <= 1 || cargando} onClick={() => setPagina((actual) => actual - 1)} className="min-h-10 flex-1 rounded-lg border border-slate-300 px-3 py-2 disabled:opacity-50 sm:flex-none">Anterior</button>
-              <button type="button" disabled={pagina >= paginas || cargando} onClick={() => setPagina((actual) => actual + 1)} className="min-h-10 flex-1 rounded-lg border border-slate-300 px-3 py-2 disabled:opacity-50 sm:flex-none">Siguiente</button>
-            </>
-          )}
-        </div>
-      </div>
+      <Paginacion
+        rango={rangoVisible}
+        porPagina={porPagina}
+        cargando={cargando}
+        sustantivo="equipos"
+        onCambiarPagina={setPagina}
+        onCambiarPorPagina={(nuevo) => {
+          setPorPagina(normalizarPorPagina(nuevo))
+          setPagina(1)
+        }}
+      />
 
       {categoriaModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
@@ -1422,7 +1870,7 @@ export default function Equipos() {
                   type="submit"
                   form="formulario-equipo"
                   disabled={guardando || cargandoDatosEdicion || Boolean(errorDatosEdicion) || !categorias.length}
-                  className="min-h-10 rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-600 disabled:opacity-60"
+                  className="min-h-10 rounded-lg bg-orange-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-800 disabled:opacity-60"
                 >
                   {guardando ? 'Guardando...' : editando ? 'Guardar cambios' : 'Guardar equipo'}
                 </button>
@@ -1623,7 +2071,7 @@ export default function Equipos() {
                                 <div className="mt-2 flex items-center gap-3 rounded-lg border border-slate-200 p-3">
                                   <span className="relative flex h-10 w-10 shrink-0 items-end justify-center rounded-md border border-slate-200 bg-white pb-1 text-[9px] font-bold text-orange-700">
                                     {foto.archivo.name.split('.').pop()?.slice(0, 4).toUpperCase() ?? 'IMG'}
-                                    <span className="absolute -bottom-1 left-0 rounded bg-orange-500 px-1 text-[7px] text-white">ARCHIVO</span>
+                                    <span className="absolute -bottom-1 left-0 rounded bg-orange-700 px-1 text-[7px] text-white">ARCHIVO</span>
                                   </span>
                                   <span className="min-w-0 flex-1">
                                     <span className="block truncate text-sm font-semibold text-slate-700">{foto.archivo.name}</span>
@@ -1782,7 +2230,7 @@ export default function Equipos() {
               )}
               <div className="grid grid-cols-2 gap-2 border-t border-slate-100 pt-4 sm:flex sm:justify-end">
                 <button type="button" onClick={() => setModalAbierto(false)} className="min-h-10 rounded-lg px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-100">Cancelar</button>
-                <button type="submit" disabled={guardando || cargandoDatosEdicion || Boolean(errorDatosEdicion) || !categorias.length} className="min-h-10 rounded-lg bg-orange-500 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-600 disabled:opacity-60">
+                <button type="submit" disabled={guardando || cargandoDatosEdicion || Boolean(errorDatosEdicion) || !categorias.length} className="min-h-10 rounded-lg bg-orange-700 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-800 disabled:opacity-60">
                   {guardando ? 'Guardando...' : editando ? 'Guardar cambios' : 'Registrar equipo'}
                 </button>
               </div>

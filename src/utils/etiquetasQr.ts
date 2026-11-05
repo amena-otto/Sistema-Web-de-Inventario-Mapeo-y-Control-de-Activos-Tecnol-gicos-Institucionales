@@ -1,4 +1,4 @@
-export type EquipoEtiqueta = { id: string; nombre: string; codigo_institucional: string }
+export type EquipoEtiqueta = { id: string; nombre: string; codigo_institucional: string; numero_serie?: string | null }
 export type EtiquetaPreparada = EquipoEtiqueta & { url: string; imagen: string }
 
 export function crearFormatoEtiquetas(altoMm = 35) {
@@ -55,18 +55,36 @@ export function ajustarTexto(
   throw new Error('El texto supera el espacio legible de la etiqueta. Selecciona una altura mayor.')
 }
 
-export function ajustarDatosEtiqueta(nombre: string, codigo: string, altoPx: number, medir: (texto: string, tamano: number) => number) {
+export function ajustarDatosEtiqueta(
+  nombre: string,
+  codigo: string,
+  altoPx: number,
+  medir: (texto: string, tamano: number) => number,
+  numeroSerie?: string | null,
+) {
   const espacio = altoPx - 220
+  const serie = numeroSerie?.trim() || 'Sin serie'
   for (let maximo = 44; maximo >= 20; maximo--) {
     const bloqueNombre = ajustarTexto(`NOMBRE: ${nombre}`, 706, espacio, maximo, 20, medir)
     const bloqueCodigo = ajustarTexto(`CÓDIGO: ${codigo}`, 706, espacio, Math.min(40, maximo), 20, medir)
+    const bloqueSerie = ajustarTexto(`SERIE: ${serie}`, 706, espacio, Math.min(36, maximo), 20, medir)
     const altoNombre = bloqueNombre.lineas.length * bloqueNombre.interlineado
     const altoCodigo = bloqueCodigo.lineas.length * bloqueCodigo.interlineado
-    if (altoNombre + altoCodigo + 12 <= espacio) return {
-      nombre: bloqueNombre, codigo: bloqueCodigo, nombreY: 141, codigoY: 141 + altoNombre + 12,
+    const altoSerie = bloqueSerie.lineas.length * bloqueSerie.interlineado
+    if (altoNombre + altoCodigo + altoSerie + 24 <= espacio) {
+      const codigoY = 141 + altoNombre + 12
+      const serieY = codigoY + altoCodigo + 12
+      return {
+        nombre: bloqueNombre,
+        codigo: bloqueCodigo,
+        serie: bloqueSerie,
+        nombreY: 141,
+        codigoY,
+        serieY,
+      }
     }
   }
-  throw new Error('El nombre o código necesita más espacio legible. Selecciona una altura de 40 o 45 mm.')
+  throw new Error('El nombre, código o serie necesitan más espacio legible. Selecciona una altura de 40 o 45 mm.')
 }
 
 function escaparHtml(texto: string) {
@@ -97,7 +115,7 @@ export function crearDocumentoImpresion(etiquetas: readonly EtiquetaPreparada[],
   if (!etiquetas.length) throw new Error('Selecciona al menos un equipo.')
   const hojas = dividirEnPaginas(etiquetas, formato).map((pagina) => `<section class="hoja">${pagina.map((etiqueta) => {
     if (!/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(etiqueta.imagen)) throw new Error('La etiqueta no contiene una imagen PNG válida.')
-    return `<img class="etiqueta" src="${etiqueta.imagen}" alt="${escaparHtml(`${etiqueta.codigo_institucional} — ${etiqueta.nombre}`)}">`
+    return `<img class="etiqueta" src="${etiqueta.imagen}" alt="${escaparHtml(`${etiqueta.codigo_institucional} — ${etiqueta.nombre} — Serie ${etiqueta.numero_serie ?? 'Sin serie'}`)}">`
   }).join('')}</section>`).join('')
   return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Etiquetas institucionales</title><style>${crearEstilosImpresionEtiquetas(formato)}</style></head><body>${hojas}</body></html>`
 }
