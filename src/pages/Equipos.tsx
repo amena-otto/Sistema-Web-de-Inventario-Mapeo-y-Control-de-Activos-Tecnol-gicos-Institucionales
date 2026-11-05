@@ -16,6 +16,7 @@ import {
 } from '../utils/paginacion'
 import { listarHistorialMovimientos, type Movimiento } from '../services/movimientosService'
 import { listarMantenimientos, type Mantenimiento } from '../services/mantenimientosService'
+import { desplazarAlInicioDeListado } from '../utils/desplazamiento'
 import { usePermissions } from '../hooks/usePermissions'
 import {
   actualizarEquipo,
@@ -211,6 +212,7 @@ export default function Equipos() {
   const fotoAdicionalSelectorRef = useRef<HTMLButtonElement>(null)
   const enfocarSeccionFotosAdicionales = useRef(false)
   const vistasPendientes = useRef(new Set<string>())
+  const listadoRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     componenteMontado.current = true
     return () => {
@@ -492,6 +494,13 @@ export default function Equipos() {
     setAmbienteFiltrosIds([])
     setSinUbicacionFiltro(false)
     setPagina(1)
+  }
+
+  function cambiarPaginaDesdePie(nuevaPagina: number) {
+    setPagina(nuevaPagina)
+    requestAnimationFrame(() => {
+      desplazarAlInicioDeListado(listadoRef.current)
+    })
   }
 
   function crearVistaArchivo(archivo: File): ArchivoConVista {
@@ -1296,7 +1305,7 @@ export default function Equipos() {
         </div>
       )}
 
-      <div className="mt-4 min-w-0 overflow-hidden rounded-xl bg-white shadow" aria-busy={cargando}>
+      <div ref={listadoRef} className="mt-4 min-w-0 scroll-mt-24 overflow-hidden rounded-xl bg-white shadow" aria-busy={cargando}>
         <div className="flex flex-col items-stretch justify-between gap-3 border-b border-slate-100 px-3 py-3 sm:flex-row sm:items-center sm:px-4">
           <h2 className="min-w-0 font-semibold text-slate-800">
             {verEquiposDadosDeBaja ? 'Equipos dados de baja' : 'Equipos registrados'}
@@ -1530,7 +1539,7 @@ export default function Equipos() {
               sustantivo="equipos"
               soloNavegacion
               ariaLabel="Paginación inferior de equipos"
-              onCambiarPagina={setPagina}
+              onCambiarPagina={cambiarPaginaDesdePie}
             />
           </div>
         )}

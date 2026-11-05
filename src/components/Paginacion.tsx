@@ -34,7 +34,7 @@ export default function Paginacion({
     <nav
       aria-label={ariaLabel ?? `Paginación de ${sustantivo}`}
       className={`flex flex-col gap-3 text-sm text-slate-700 sm:flex-row sm:flex-wrap sm:items-center ${
-        soloNavegacion ? 'sm:justify-end' : 'sm:justify-between'
+        soloNavegacion ? 'sm:justify-center' : 'sm:justify-between'
       }`}
     >
       {!soloNavegacion && (
@@ -65,9 +65,10 @@ export default function Paginacion({
         </div>
       )}
 
-      <div className={`flex items-center justify-between gap-2 sm:justify-end ${soloNavegacion ? 'sm:w-auto' : ''}`}>
+      <div className={`flex items-center justify-between gap-2 ${soloNavegacion ? 'sm:w-auto sm:justify-center' : 'sm:justify-end'}`}>
         <button
           type="button"
+          aria-label="Ir a la página anterior"
           disabled={cargando || rango.pagina <= 1}
           onClick={() => onCambiarPagina(rango.pagina - 1)}
           className="min-h-9 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-semibold text-slate-700 transition hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none"
@@ -80,6 +81,7 @@ export default function Paginacion({
         </span>
         <button
           type="button"
+          aria-label="Ir a la página siguiente"
           disabled={cargando || rango.pagina >= rango.totalPaginas}
           onClick={() => onCambiarPagina(rango.pagina + 1)}
           className="min-h-9 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-semibold text-slate-700 transition hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none"
