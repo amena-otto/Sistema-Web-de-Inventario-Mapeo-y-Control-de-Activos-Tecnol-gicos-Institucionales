@@ -1,4 +1,13 @@
 import { supabase } from './supabaseClient'
+import {
+  cargarEquiposDeAmbientes,
+  registrarErrorSupabase,
+  type EquipoUbicacion,
+  type FilaEquipoPiso,
+  type RespuestaEquiposPiso,
+} from '../utils/equiposPiso'
+
+export type { EquipoUbicacion } from '../utils/equiposPiso'
 
 export type Pabellon = {
   id: string
@@ -13,7 +22,6 @@ export type Piso = {
   nombre: string
   numero: number | null
   activo: boolean
-  plano_storage_path: string | null
 }
 
 export type AmbienteUbicacion = {
@@ -24,20 +32,6 @@ export type AmbienteUbicacion = {
   tipo: string
   descripcion: string | null
   activo: boolean
-}
-
-export type EquipoUbicacion = {
-  id: string
-  codigo_institucional: string
-  nombre: string
-  marca: string | null
-  modelo: string | null
-  numero_serie: string | null
-  estado_operativo: string
-  situacion: string
-  ambiente_id: string | null
-  categoria: { nombre: string } | null
-  marcador: { x: number; y: number } | null
 }
 
 export async function listarPabellones(): Promise<Pabellon[]> {
@@ -52,7 +46,7 @@ export async function listarPabellones(): Promise<Pabellon[]> {
 export async function listarPisos(): Promise<Piso[]> {
   const { data, error } = await supabase
     .from('pisos')
-    .select('id, pabellon_id, nombre, numero, activo, plano_storage_path')
+    .select('id, pabellon_id, nombre, numero, activo')
     .order('numero')
   if (error) throw error
   return data as Piso[]
@@ -89,7 +83,7 @@ export async function guardarPiso(
     ? supabase.from('pisos').update(datos).eq('id', id)
     : supabase.from('pisos').insert(datos)
   const { data, error } = await consulta
-    .select('id, pabellon_id, nombre, numero, activo, plano_storage_path')
+    .select('id, pabellon_id, nombre, numero, activo')
     .single()
   if (error) throw error
   return data as Piso
@@ -154,142 +148,42 @@ export async function eliminarAmbiente(id: string) {
   if (error) throw error
 }
 
-export async function listarEquiposPiso(pisoId: string): Promise<EquipoUbicacion[]> {
-  const { data, error } = await supabase
-  .from('equipos')
-  .select(
-    'id, codigo_institucional, nombre, marca, modelo, numero_serie, estado_operativo, situacion, ambiente_id, categorias_equipos(nombre), ambientes!inner(piso_id)'
-  )
-  .eq('ambientes.piso_id', pisoId)
-  .eq('situacion', 'activo')
-  .order('codigo_institucional')
-  if (error) throw error
+export async function listarEquiposPiso(
+  ambienteIds: string[],
+): Promise<EquipoUbicacion[]> {
+  if (!ambienteIds.length) return []
 
-  return (data ?? []).map((item) => {
-    const fila = item as unknown as {
-      id: string
-      codigo_institucional: string
-      nombre: string
-      marca: string | null
-      modelo: string | null
-      numero_serie: string | null
-      estado_operativo: string
-      situacion: string
-      ambiente_id: string | null
-      categorias_equipos: { nombre: string } | { nombre: string }[] | null
-    }
-    const categoria = Array.isArray(fila.categorias_equipos)
-      ? fila.categorias_equipos[0] ?? null
-      : fila.categorias_equipos
-    return { ...fila, categoria, marcador: null }
-  })
-}
-
-export async function guardarMarcador(
-  equipoId: string,
-  pisoId: string,
-  x: number,
-  y: number,
-) {
-  const { error } = await supabase.from('marcadores_mapa').upsert(
-    { equipo_id: equipoId, piso_id: pisoId, x, y },
-    { onConflict: 'equipo_id' },
-  )
-  if (error) throw error
-}
-
-export async function eliminarMarcador(equipoId: string) {
-  const { error } = await supabase
-    .from('marcadores_mapa')
-    .delete()
-    .eq('equipo_id', equipoId)
-  if (error) throw error
-}
-
-export async function actualizarMarcadorPosicion(
-  equipoId: string,
-  x: number,
-  y: number,
-) {
-  const { error } = await supabase
-    .from('marcadores_mapa')
-    .update({ x, y })
-    .eq('equipo_id', equipoId)
-  if (error) throw error
-}
-
-export async function subirPlano(pisoId: string, file: File): Promise<string> {
-  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
-    throw new Error('El plano debe ser JPG, PNG o WebP.')
-  }
-
-  const imagen = await createImageBitmap(file)
-  const escala = Math.min(1, 2400 / Math.max(imagen.width, imagen.height))
-  const lienzo = document.createElement('canvas')
-  lienzo.width = Math.max(1, Math.round(imagen.width * escala))
-  lienzo.height = Math.max(1, Math.round(imagen.height * escala))
-  const contexto = lienzo.getContext('2d')
-  if (!contexto) throw new Error('No se pudo preparar el plano.')
-  contexto.drawImage(imagen, 0, 0, lienzo.width, lienzo.height)
-  imagen.close()
-
-  const plano = await new Promise<Blob | null>((resolve) =>
-    lienzo.toBlob(resolve, 'image/webp', 0.86),
-  )
-  if (!plano) throw new Error('No se pudo optimizar el plano.')
-  if (plano.size > 10 * 1024 * 1024) {
-    throw new Error('El plano optimizado supera el límite de 10 MB.')
-  }
-
-  const ruta = `pisos/${pisoId}/${crypto.randomUUID()}.webp`
-  const { error: subidaError } = await supabase.storage
-    .from('planos-institucionales')
-    .upload(ruta, plano, { contentType: 'image/webp', upsert: false })
-  if (subidaError) throw subidaError
-
-  const { error: pisoError } = await supabase
-    .from('pisos')
-    .update({ plano_storage_path: ruta })
-    .eq('id', pisoId)
-  if (pisoError) {
-    throw new Error(
-      `El plano se subió, pero no se vinculó al piso: ${pisoError.message}`,
-      { cause: pisoError },
+  const { data: categoriasData, error: categoriasError } = await supabase
+    .from('categorias_equipos')
+    .select('id, nombre')
+  if (categoriasError) {
+    registrarErrorSupabase(
+      'No se pudieron cargar las categorías para los equipos del piso',
+      categoriasError,
     )
   }
-  return ruta
-}
 
-export async function urlPlano(path: string) {
-  const { data, error } = await supabase.storage
-    .from('planos-institucionales')
-    .createSignedUrl(path, 3600)
-  if (error) throw error
-  return data.signedUrl
-}
+  const categorias = new Map<string, string>(
+    (categoriasData ?? []).map((categoria) => [
+      String(categoria.id),
+      String(categoria.nombre),
+    ]),
+  )
 
-export async function eliminarPlano(
-  pisoId: string,
-  rutaPlano: string,
-): Promise<string | null> {
-  const { error: pisoError } = await supabase
-    .from('pisos')
-    .update({ plano_storage_path: null })
-    .eq('id', pisoId)
-  if (pisoError) throw pisoError
+  return cargarEquiposDeAmbientes(
+    ambienteIds,
+    async (ids): Promise<RespuestaEquiposPiso> => {
+      const { data, error } = await supabase
+        .from('equipos')
+        .select(
+          'id, codigo_institucional, nombre, marca, modelo, numero_serie, estado_operativo, situacion, ambiente_id, categoria_id',
+        )
+        .in('ambiente_id', ids)
+        .eq('situacion', 'activo')
+        .order('codigo_institucional')
 
-  if (!rutaPlano) return null
-
-  const { error: archivoError } = await supabase.storage
-    .from('planos-institucionales')
-    .remove([rutaPlano])
-  if (archivoError) {
-    console.error(
-      'El plano se desvinculó, pero no se pudo eliminar el archivo:',
-      archivoError.message,
-    )
-    return 'El plano se quitó del piso, pero el archivo no se pudo eliminar del almacenamiento.'
-  }
-
-  return null
+      return { data: data as FilaEquipoPiso[] | null, error }
+    },
+    categorias,
+  )
 }
