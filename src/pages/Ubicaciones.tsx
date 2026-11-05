@@ -1,7 +1,8 @@
 import { filtrarEquiposUbicacion, etiquetasEstadoUbicacion as etiquetaEstado } from '../utils/busquedaEquiposUbicacion'
 import { idsAmbientesDelPiso, registrarErrorSupabase } from '../utils/equiposPiso'
+import { desplazarAlInicioDeListado } from '../utils/desplazamiento'
 import { validarEquipo } from '../utils/inventario'
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { usePermissions } from '../hooks/usePermissions'
 import EstadoEquipoBadge from '../components/EstadoEquipoBadge'
@@ -72,6 +73,7 @@ export default function Ubicaciones() {
     POR_PAGINA_PREDETERMINADO,
   )
   const [recarga, setRecarga] = useState(0)
+  const listadoRef = useRef<HTMLElement>(null)
 
   useEffect(() => {
     let vigente = true
@@ -216,6 +218,13 @@ export default function Ubicaciones() {
     setAmbienteElegido(valor)
     setBusqueda('')
     setPaginaEquipos(1)
+  }
+
+  function cambiarPaginaDesdePie(nuevaPagina: number) {
+    setPaginaEquipos(nuevaPagina)
+    requestAnimationFrame(() => {
+      desplazarAlInicioDeListado(listadoRef.current)
+    })
   }
 
   function abrirFormulario(
@@ -456,7 +465,7 @@ export default function Ubicaciones() {
             </section>
           </div>
 
-          <section className="mt-5 min-w-0 rounded-xl bg-white shadow">
+          <section ref={listadoRef} className="mt-5 min-w-0 scroll-mt-24 rounded-xl bg-white shadow">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b p-4">
               <div>
                 <h3 className="font-semibold">{ambienteElegido ? 'Equipos del ambiente' : 'Equipos del piso'}</h3>
@@ -570,6 +579,18 @@ export default function Ubicaciones() {
                       })}
                     </tbody>
                   </table>
+                </div>
+
+                <div className="border-t border-slate-100 px-4 py-3">
+                  <Paginacion
+                    rango={rangoEquipos}
+                    porPagina={porPaginaEquipos}
+                    cargando={cargando}
+                    sustantivo="equipos"
+                    soloNavegacion
+                    ariaLabel="Paginación inferior de equipos"
+                    onCambiarPagina={cambiarPaginaDesdePie}
+                  />
                 </div>
               </>
             )}
