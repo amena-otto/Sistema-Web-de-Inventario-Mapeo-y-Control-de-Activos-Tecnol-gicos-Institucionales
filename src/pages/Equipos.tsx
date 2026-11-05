@@ -1,3 +1,4 @@
+import { validarEquipo } from '../utils/inventario'
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import EquipoQrDialog from '../components/EquipoQrDialog'
@@ -109,6 +110,7 @@ export default function Equipos() {
   const puedeVerMantenimientos = can('mantenimientos.ver')
   const puedeVerMovimientos = can('movimientos.ver')
   const [categorias, setCategorias] = useState<Categoria[]>([])
+  const [erroresCampos, setErroresCampos] = useState<ReturnType<typeof validarEquipo>>({})
   const [ambientes, setAmbientes] = useState<Ambiente[]>([])
   const [responsables, setResponsables] = useState<Responsable[]>([])
   const [equipos, setEquipos] = useState<Equipo[]>([])
@@ -142,6 +144,8 @@ export default function Equipos() {
   const [duplicados, setDuplicados] = useState<Equipo[]>([])
   const [equipoDetalle, setEquipoDetalle] = useState<Equipo | null>(null)
   const [equipoQr, setEquipoQr] = useState<Equipo | null>(null)
+  const [seleccionQr, setSeleccionQr] = useState<Map<string, Equipo>>(() => new Map())
+  const [equiposQr, setEquiposQr] = useState<Equipo[] | null>(null)
   const [detalleCargando, setDetalleCargando] = useState(false)
   const [componentes, setComponentes] = useState<Componente[]>([])
   const [relaciones, setRelaciones] = useState<RelacionEquipo[]>([])
@@ -300,6 +304,28 @@ export default function Equipos() {
   )
   const fotografiaPrincipal = fotografias.find((fotografia) => fotografia.tipo === 'principal')
   const cerrarQr = useCallback(() => setEquipoQr(null), [])
+  const cerrarQrMasivo = useCallback(() => setEquiposQr(null), [])
+
+  function seleccionarEtiqueta(equipo: Equipo, seleccionada: boolean) {
+    setSeleccionQr((anterior) => {
+      const nueva = new Map(anterior)
+      if (seleccionada) nueva.set(equipo.id, equipo)
+      else nueva.delete(equipo.id)
+      return nueva
+    })
+  }
+
+  function seleccionarPaginaEtiquetas(seleccionada: boolean) {
+    setSeleccionQr((anterior) => {
+      const nueva = new Map(anterior)
+      for (const equipo of equipos) {
+        if (seleccionada) nueva.set(equipo.id, equipo)
+        else nueva.delete(equipo.id)
+      }
+      return nueva
+    })
+  }
+
   const cerrarDetalle = useCallback(() => {
     solicitudDetalle.current += 1
     solicitudFotografias.current += 1
@@ -392,6 +418,7 @@ export default function Equipos() {
     setEditando(null)
     setCargandoDatosEdicion(false)
     setErrorDatosEdicion('')
+    setErroresCampos({})
     setDatos({ ...vacio, categoria_id: categorias[0]?.id ?? '' })
     setTecnicas({})
     setDuplicados([])
@@ -412,6 +439,7 @@ export default function Equipos() {
     setError('')
     setAviso('')
     setDuplicados([])
+    setErroresCampos({})
     setDatos({
       categoria_id: equipo.categoria_id,
       ambiente_id: equipo.ambiente_id,
@@ -481,6 +509,7 @@ export default function Equipos() {
 
   function cambiarDato<K extends keyof DatosEquipo>(campo: K, valor: DatosEquipo[K]) {
     setDatos((anterior) => ({ ...anterior, [campo]: valor }))
+    setErroresCampos((actual) => ({ ...actual, [campo]: undefined }))
     setDuplicados([])
   }
 
@@ -508,6 +537,9 @@ export default function Equipos() {
   async function guardarEquipo(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (cargandoDatosEdicion || errorDatosEdicion) return
+    const errores = validarEquipo(datos, { categorias, ambientes })
+    setErroresCampos(errores)
+    if (Object.keys(errores).length) return
     setError('')
     setAviso('')
     setGuardando(true)
@@ -1124,6 +1156,16 @@ export default function Equipos() {
             </button>
           )}
         </div>
+        <div className="flex flex-wrap items-center gap-3 border-b border-slate-100 bg-blue-50/50 px-4 py-3">
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input type="checkbox" disabled={cargando || !equipos.length} checked={equipos.length > 0 && equipos.every((equipo) => seleccionQr.has(equipo.id))} ref={(input) => { if (input) input.indeterminate = equipos.some((equipo) => seleccionQr.has(equipo.id)) && !equipos.every((equipo) => seleccionQr.has(equipo.id)) }} onChange={(event) => seleccionarPaginaEtiquetas(event.target.checked)} />
+            Seleccionar esta página
+          </label>
+          <span role="status" className="text-sm text-slate-600">{seleccionQr.size} equipo(s) seleccionado(s)</span>
+          <button type="button" disabled={!seleccionQr.size} onClick={() => setEquiposQr([...seleccionQr.values()].map((seleccionado) => equipos.find((actual) => actual.id === seleccionado.id) ?? seleccionado))} className="rounded-lg bg-blue-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">Vista previa e impresión masiva</button>
+          {seleccionQr.size > 0 && <button type="button" onClick={() => setSeleccionQr(new Map())} className="text-sm text-blue-800 underline">Limpiar selección</button>}
+          <p className="w-full text-xs text-slate-500">La selección se conserva al cambiar de página o aplicar filtros.</p>
+        </div>
         <div className="divide-y divide-slate-100 md:hidden">
           {cargando && <p role="status" className="px-4 py-8 text-center text-sm text-slate-500">Cargando inventario...</p>}
           {!cargando && equipos.length === 0 && <p className="px-4 py-8 text-center text-sm text-slate-500">No hay equipos para mostrar.</p>}
@@ -1132,6 +1174,7 @@ export default function Equipos() {
             const deBaja = equipo.situacion !== 'activo'
             return (
               <article key={equipo.id} className="min-w-0 space-y-3 p-4">
+                <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={seleccionQr.has(equipo.id)} onChange={(event) => seleccionarEtiqueta(equipo, event.target.checked)} />Seleccionar para etiquetas</label>
                 <div className="flex min-w-0 items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="break-words text-sm font-bold text-orange-800">{equipo.codigo_institucional}</p>
@@ -1185,6 +1228,7 @@ export default function Equipos() {
         <table className="w-full min-w-[900px] text-left text-sm">
           <thead className="border-b bg-slate-50 text-slate-600">
             <tr>
+              <th className="px-4 py-3"><span className="sr-only">Seleccionar para etiquetas</span></th>
               <th className="px-4 py-3">Código / equipo</th>
               <th className="px-4 py-3">Categoría</th>
               <th className="px-4 py-3">Serie / marca</th>
@@ -1195,16 +1239,17 @@ export default function Equipos() {
           </thead>
           <tbody>
             {cargando && (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500">Cargando inventario...</td></tr>
+              <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500">Cargando inventario...</td></tr>
             )}
             {!cargando && equipos.length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500">No hay equipos para mostrar.</td></tr>
+              <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500">No hay equipos para mostrar.</td></tr>
             )}
             {!cargando && equipos.map((equipo) => {
               const ambiente = equipo.ambiente_id ? ambientesPorId.get(equipo.ambiente_id) : null
               const deBaja = equipo.situacion !== 'activo'
               return (
                 <tr key={equipo.id} className="border-b last:border-0">
+                  <td className="px-4 py-3"><input type="checkbox" aria-label={`Seleccionar ${equipo.codigo_institucional} para etiquetas`} checked={seleccionQr.has(equipo.id)} onChange={(event) => seleccionarEtiqueta(equipo, event.target.checked)} /></td>
                   <td className="px-4 py-3">
                     <p className="font-semibold text-blue-800">{equipo.codigo_institucional}</p>
                     <p className="font-medium text-slate-800">{equipo.nombre}</p>
@@ -1331,19 +1376,20 @@ export default function Equipos() {
                 No hay categorías activas. Un administrador debe crearlas en la gestión de categorías antes de registrar equipos.
               </p>
             )}
-            <form id="formulario-equipo" onSubmit={(event) => void guardarEquipo(event)} className="mt-4 space-y-5">
+            <form noValidate id="formulario-equipo" onSubmit={(event) => void guardarEquipo(event)} className="mt-4 space-y-5">
               <fieldset disabled={guardando || !categorias.length} className="min-w-0 space-y-5">
                 <div className="min-w-0 rounded-xl border border-slate-100 bg-white p-3 sm:p-5">
                   <div className="border-b border-slate-100 pb-4">
                     <h4 className="font-bold text-slate-900">Datos principales</h4>
                     <p className="mt-1 text-sm text-slate-500">
-                      Solo el nombre y la categoría son obligatorios. Puedes completar el resto ahora o después.
+                      Nombre, número de serie, categoría, ubicación y estado operativo son obligatorios. Los demás datos son opcionales.
                     </p>
                   </div>
                   <div className="mt-4 space-y-4">
                     <label className="grid gap-2 text-sm sm:grid-cols-[190px_minmax(0,1fr)] sm:items-center">
                       <span className="font-semibold text-slate-700">Nombre o descripción <span className="text-orange-600">*</span></span>
-                      <input required maxLength={200} value={datos.nombre} onChange={(e) => cambiarDato('nombre', e.target.value)} placeholder="Ej. Computadora de oficina" className="w-full rounded-xl border border-slate-200 px-3.5 py-3 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-orange-400 focus:ring-4 focus:ring-orange-100" />
+                      <input required maxLength={200} aria-invalid={Boolean(erroresCampos.nombre)} aria-describedby={erroresCampos.nombre ? 'error-nombre' : undefined} value={datos.nombre} onChange={(e) => cambiarDato('nombre', e.target.value)} placeholder="Ej. Computadora de oficina" className="w-full rounded-xl border border-slate-200 px-3.5 py-3 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-orange-400 focus:ring-4 focus:ring-orange-100" />
+                      {erroresCampos.nombre && <span id="error-nombre" role="alert" className="block text-sm text-red-700">{erroresCampos.nombre}</span>}
                     </label>
                     <label className="grid gap-2 text-sm sm:grid-cols-[190px_minmax(0,1fr)] sm:items-center">
                       <span className="font-semibold text-slate-700">Categoría <span className="text-orange-600">*</span></span>
@@ -1352,7 +1398,7 @@ export default function Equipos() {
                           <path d="m20 13-7 7L3 10V4h6l11 9Z" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
                           <circle cx="7.5" cy="7.5" r="1" fill="currentColor" />
                         </svg>
-                        <select required value={datos.categoria_id} onChange={(e) => cambiarDato('categoria_id', e.target.value)} className="w-full appearance-none rounded-xl border border-slate-200 bg-white py-3 pl-10 pr-20 text-sm text-slate-800 outline-none transition focus:border-orange-400 focus:ring-4 focus:ring-orange-100">
+                        <select required aria-invalid={Boolean(erroresCampos.categoria_id)} aria-describedby={erroresCampos.categoria_id ? 'error-categoria_id' : undefined} value={datos.categoria_id} onChange={(e) => cambiarDato('categoria_id', e.target.value)} className="w-full appearance-none rounded-xl border border-slate-200 bg-white py-3 pl-10 pr-20 text-sm text-slate-800 outline-none transition focus:border-orange-400 focus:ring-4 focus:ring-orange-100">
                           <option value="">Selecciona una categoría</option>
                           {categorias.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}
                         </select>
@@ -1371,12 +1417,27 @@ export default function Equipos() {
                           <path d="m7 10 5 5 5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
                         </svg>
                       </span>
+                      {erroresCampos.categoria_id && <span id="error-categoria_id" role="alert" className="block text-sm text-red-700">{erroresCampos.categoria_id}</span>}
                     </label>
                     <label className="grid gap-2 text-sm sm:grid-cols-[190px_minmax(0,1fr)] sm:items-center">
-                      <span className="font-semibold text-slate-700">Estado operativo</span>
-                      <select value={datos.estado_operativo} onChange={(e) => cambiarDato('estado_operativo', e.target.value as EstadoOperativo)} className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-sm outline-none transition focus:border-orange-400 focus:ring-4 focus:ring-orange-100">
+                      <span className="font-semibold text-slate-700">Ubicación <span className="text-orange-600">*</span></span>
+                      <select required aria-invalid={Boolean(erroresCampos.ambiente_id)} aria-describedby={erroresCampos.ambiente_id ? 'error-ambiente_id' : undefined} value={datos.ambiente_id ?? ''} onChange={(e) => cambiarDato('ambiente_id', e.target.value || null)} className="mt-1 w-full rounded border border-slate-300 px-3 py-2">
+                        <option value="">Sin ubicación asignada</option>
+                        {ambientes.map((item) => <option key={item.id} value={item.id}>{item.pabellon} / {item.piso} / {item.codigo} — {item.nombre}</option>)}
+                      </select>
+                      {erroresCampos.ambiente_id && <span id="error-ambiente_id" role="alert" className="block text-sm text-red-700">{erroresCampos.ambiente_id}</span>}
+                    </label>
+                    <label className="grid gap-2 text-sm sm:grid-cols-[190px_minmax(0,1fr)] sm:items-center">
+                      <span className="font-semibold text-slate-700">Número de serie <span className="text-orange-600">*</span></span>
+                      <input required maxLength={150} aria-invalid={Boolean(erroresCampos.numero_serie)} aria-describedby={erroresCampos.numero_serie ? 'error-numero_serie' : undefined} value={datos.numero_serie ?? ''} onChange={(e) => cambiarDato('numero_serie', e.target.value)} className="mt-1 w-full rounded border border-slate-300 px-3 py-2" />
+                      {erroresCampos.numero_serie && <span id="error-numero_serie" role="alert" className="block text-sm text-red-700">{erroresCampos.numero_serie}</span>}
+                    </label>
+                    <label className="grid gap-2 text-sm sm:grid-cols-[190px_minmax(0,1fr)] sm:items-center">
+                      <span className="font-semibold text-slate-700">Estado operativo *</span>
+                      <select required aria-invalid={Boolean(erroresCampos.estado_operativo)} aria-describedby={erroresCampos.estado_operativo ? 'error-estado_operativo' : undefined} value={datos.estado_operativo} onChange={(e) => cambiarDato('estado_operativo', e.target.value as EstadoOperativo)} className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-sm outline-none transition focus:border-orange-400 focus:ring-4 focus:ring-orange-100">
                         {estadosOperativos.map((item) => <option key={item} value={item}>{etiquetasEstado[item]}</option>)}
                       </select>
+                      {erroresCampos.estado_operativo && <span id="error-estado_operativo" role="alert" className="block text-sm text-red-700">{erroresCampos.estado_operativo}</span>}
                     </label>
                   </div>
                 </div>
@@ -1387,12 +1448,6 @@ export default function Equipos() {
                     <div>
                       <h4 className="font-semibold">Identificación, ubicación y control</h4>
                       <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                        <label className="text-sm">Ubicación
-                          <select disabled={false} value={datos.ambiente_id ?? ''} onChange={(e) => cambiarDato('ambiente_id', e.target.value || null)} className="mt-1 w-full rounded border border-slate-300 px-3 py-2">
-                            <option value="">Sin ubicación asignada</option>
-                            {ambientes.map((item) => <option key={item.id} value={item.id}>{item.pabellon} / {item.piso} / {item.codigo} — {item.nombre}</option>)}
-                          </select>
-                        </label>
                         <label className="text-sm">Código / posición en ambiente
                           <input maxLength={100} value={datos.posicion ?? ''} onChange={(e) => cambiarDato('posicion', e.target.value)} placeholder="Ej. Escritorio 4" className="mt-1 w-full rounded border border-slate-300 px-3 py-2" />
                         </label>
@@ -1407,9 +1462,6 @@ export default function Equipos() {
                         </label>
                         <label className="text-sm">Modelo
                           <input maxLength={100} value={datos.modelo ?? ''} onChange={(e) => cambiarDato('modelo', e.target.value)} className="mt-1 w-full rounded border border-slate-300 px-3 py-2" />
-                        </label>
-                        <label className="text-sm">Número de serie
-                          <input maxLength={150} value={datos.numero_serie ?? ''} onChange={(e) => cambiarDato('numero_serie', e.target.value)} className="mt-1 w-full rounded border border-slate-300 px-3 py-2" />
                         </label>
                         <label className="text-sm">Código patrimonial
                           <input maxLength={100} value={datos.codigo_patrimonial ?? ''} onChange={(e) => cambiarDato('codigo_patrimonial', e.target.value)} className="mt-1 w-full rounded border border-slate-300 px-3 py-2" />
@@ -1668,6 +1720,7 @@ export default function Equipos() {
       )}
 
       {equipoQr && <EquipoQrDialog key={equipoQr.id} equipo={equipoQr} onClose={cerrarQr} />}
+      {equiposQr && <EquipoQrDialog equipos={equiposQr} onClose={cerrarQrMasivo} />}
 
       {equipoDetalle && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/50 p-3 sm:p-8">

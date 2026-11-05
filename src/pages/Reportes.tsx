@@ -1,3 +1,5 @@
+import { prepararCsvInventario, valoresFilaCsv, leerArchivoCsv, fechaCsvAISO } from '../utils/csvInventario'
+import { prepararFilaImportacion, columnasImportacion } from '../utils/inventario'
 import { useEffect, useMemo, useState } from 'react'
 import { usePermissions } from '../hooks/usePermissions'
 import {
@@ -9,7 +11,6 @@ import {
   type Categoria,
   type DatosEquipo,
   type Equipo,
-  type EstadoOperativo,
 } from '../services/equiposService'
 import {
   listarMantenimientos,
@@ -280,130 +281,6 @@ function fechaHoraGeneracion() {
   })
 }
 
-function normalizarCsv(valor: string) {
-  return valor
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .trim()
-    .replace(/\s+/g, ' ')
-    .toLocaleLowerCase()
-}
-
-function normalizarCabeceraCsv(valor: string) {
-  return normalizarCsv(valor).replace(/\s+/g, '_')
-}
-
-function detectarSeparador(texto: string) {
-  const primeraLinea = texto.split(/\r\n|\n|\r/, 1)[0] ?? ''
-  let entreComillas = false
-  const conteos = new Map<string, number>([
-    [',', 0],
-    [';', 0],
-    ['\t', 0],
-  ])
-
-  for (let indice = 0; indice < primeraLinea.length; indice += 1) {
-    const caracter = primeraLinea[indice]
-    if (caracter === '"' && primeraLinea[indice + 1] === '"' && entreComillas) {
-      indice += 1
-    } else if (caracter === '"') {
-      entreComillas = !entreComillas
-    } else if (!entreComillas && conteos.has(caracter)) {
-      conteos.set(caracter, (conteos.get(caracter) ?? 0) + 1)
-    }
-  }
-
-  const [separador, cantidad] = [...conteos.entries()].sort(
-    (a, b) => b[1] - a[1],
-  )[0]
-  if (!cantidad) {
-    throw new Error('No se reconoció el separador del CSV. Usa la plantilla descargable.')
-  }
-  return separador
-}
-
-function analizarCsv(texto: string): string[][] {
-  const separador = detectarSeparador(texto)
-  const filas: string[][] = []
-  let fila: string[] = []
-  let celda = ''
-  let entreComillas = false
-
-  for (let indice = 0; indice < texto.length; indice += 1) {
-    const caracter = texto[indice]
-    if (caracter === '"') {
-      if (entreComillas && texto[indice + 1] === '"') {
-        celda += '"'
-        indice += 1
-      } else if (entreComillas) {
-        entreComillas = false
-      } else if (!celda.trim()) {
-        celda = ''
-        entreComillas = true
-      } else {
-        celda += caracter
-      }
-    } else if (caracter === separador && !entreComillas) {
-      fila.push(celda.trim())
-      celda = ''
-    } else if ((caracter === '\n' || caracter === '\r') && !entreComillas) {
-      if (caracter === '\r' && texto[indice + 1] === '\n') indice += 1
-      fila.push(celda.trim())
-      if (fila.some(Boolean)) filas.push(fila)
-      fila = []
-      celda = ''
-    } else {
-      celda += caracter
-    }
-  }
-
-  if (entreComillas) throw new Error('El CSV contiene comillas sin cerrar.')
-  fila.push(celda.trim())
-  if (fila.some(Boolean)) filas.push(fila)
-  return filas
-}
-
-async function leerArchivoCsv(archivo: File) {
-  const bytes = new Uint8Array(await archivo.arrayBuffer())
-  if (bytes[0] === 0xff && bytes[1] === 0xfe) {
-    return new TextDecoder('utf-16le').decode(bytes.subarray(2))
-  }
-  if (bytes[0] === 0xfe && bytes[1] === 0xff) {
-    return new TextDecoder('utf-16be').decode(bytes.subarray(2))
-  }
-  try {
-    return new TextDecoder('utf-8', { fatal: true })
-      .decode(bytes)
-      .replace(/^\uFEFF/, '')
-  } catch {
-    return new TextDecoder('windows-1252').decode(bytes)
-  }
-}
-
-function fechaCsvAISO(valor: string) {
-  const fecha = valor.trim()
-  if (!fecha) return null
-
-  let partes = fecha.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/)
-  let iso: string
-  if (partes) {
-    iso = `${partes[1]}-${partes[2].padStart(2, '0')}-${partes[3].padStart(2, '0')}`
-  } else {
-    partes = fecha.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/)
-    if (!partes) throw new Error(`fecha inválida: ${fecha}`)
-    iso = `${partes[3]}-${partes[2].padStart(2, '0')}-${partes[1].padStart(2, '0')}`
-  }
-
-  const fechaValidada = new Date(`${iso}T00:00:00.000Z`)
-  if (
-    Number.isNaN(fechaValidada.getTime()) ||
-    fechaValidada.toISOString().slice(0, 10) !== iso
-  ) {
-    throw new Error(`fecha inválida: ${fecha}`)
-  }
-  return iso
-}
-
 export default function Reportes() {
   const { can } = usePermissions()
   const puedeVerMantenimientos = can('mantenimientos.ver')
@@ -570,12 +447,7 @@ export default function Reportes() {
   }
 
   function descargarPlantilla() {
-    const categoriaEjemplo = (
-      categorias[0]?.nombre ?? 'Reemplazar por categoría existente'
-    ).replace(/"/g, '""')
-    const contenido =
-      'nombre,categoria,marca,modelo,numero_serie,codigo_patrimonial,ambiente_codigo,estado_operativo,fecha_adquisicion,fecha_garantia,posicion,observaciones,Procesador,Memoria RAM,Almacenamiento,Sistema operativo\r\n' +
-      `Computadora aula 1,"${categoriaEjemplo}",Lenovo,ThinkCentre,,PAT-001,A101,operativo,2025-01-15,,Puesto 1,Ejemplo,Intel Core i5,8 GB DDR4,SSD 256 GB,Windows`
+    const contenido = columnasImportacion.join(',') + '\r\n'
     const url = URL.createObjectURL(new Blob([`\uFEFF${contenido}`], { type: 'text/csv;charset=utf-8' }))
     const enlace = document.createElement('a')
     enlace.href = url
@@ -585,6 +457,7 @@ export default function Reportes() {
   }
 
   async function importarCsv(archivo: File) {
+    if (!puedeImportarEquipos) return
     setImportando(true)
     setError('')
     setAviso('')
@@ -595,80 +468,29 @@ export default function Reportes() {
       if (archivo.size > 2 * 1024 * 1024) {
         throw new Error('El archivo CSV no puede superar 2 MB.')
       }
-      const filasCsv = analizarCsv(await leerArchivoCsv(archivo))
-      if (filasCsv.length < 2) throw new Error('El CSV no contiene filas para importar.')
-      if (filasCsv.length > 501) throw new Error('El límite es 500 equipos por importación.')
-
-      const cabeceras = filasCsv[0].map(normalizarCabeceraCsv)
-      if (new Set(cabeceras).size !== cabeceras.length) {
-        throw new Error('El CSV contiene encabezados repetidos.')
-      }
-      const requeridas = ['nombre', 'categoria', 'estado_operativo']
-      const faltantes = requeridas.filter((campo) => !cabeceras.includes(campo))
-      if (faltantes.length) {
-        throw new Error(
-          `Faltan columnas obligatorias: ${faltantes.join(', ')}. Descarga la plantilla CSV para ver los encabezados válidos.`,
-        )
-      }
+      const { cabeceras, filas: filasCsv } = prepararCsvInventario(await leerArchivoCsv(archivo))
 
       const catalogos = await cargarCatalogos()
       setCategorias(catalogos.categorias)
       setAmbientes(catalogos.ambientes)
 
-      for (const [indice, fila] of filasCsv.slice(1).entries()) {
-        const numeroFila = indice + 2
+      for (const fila of filasCsv) {
+        const numeroFila = fila.numeroLinea
         try {
-          while (fila.length > cabeceras.length && fila.at(-1) === '') fila.pop()
-          if (fila.length > cabeceras.length) {
-            throw new Error(
-              `la fila tiene ${fila.length} columnas y el encabezado tiene ${cabeceras.length}`,
-            )
-          }
-          while (fila.length < cabeceras.length) fila.push('')
-          const valores = Object.fromEntries(
-            cabeceras.map((cabecera, posicion) => [
-              cabecera,
-              (fila[posicion] ?? '').trim(),
-            ]),
-          )
-          const categoriaImportada = catalogos.categorias.find(
-            (item) => normalizarCsv(item.nombre) === normalizarCsv(valores.categoria),
-          )
-          if (!categoriaImportada) {
-            throw new Error(
-              `categoría "${valores.categoria}" no encontrada. Categorías disponibles: ${catalogos.categorias.map((item) => item.nombre).join(', ') || 'ninguna activa'}`,
-            )
-          }
-          const ambiente = valores.ambiente_codigo
-            ? catalogos.ambientes.find(
-                (item) => normalizarCsv(item.codigo) === normalizarCsv(valores.ambiente_codigo),
-              )
-            : undefined
-          if (valores.ambiente_codigo && !ambiente) {
-            throw new Error(`ambiente no encontrado: ${valores.ambiente_codigo}`)
-          }
-          if (!valores.nombre.trim()) throw new Error('nombre obligatorio')
-          const estadoEntrada = normalizarCsv(valores.estado_operativo).replace(/\s+/g, '_')
-          const estadoNormalizado =
-            estadoEntrada === 'operativo_con_observaciones'
-              ? 'con_fallas'
-              : estadoEntrada
-          if (!estadosOperativos.some((opcion) => opcion === estadoNormalizado)) {
-            throw new Error(`estado inválido: ${valores.estado_operativo}`)
-          }
-
+          const valores = valoresFilaCsv(fila, cabeceras)
+          const preparada = prepararFilaImportacion(valores, catalogos)
           await importarFila(
             {
               ...datosEquipoVacios,
-              categoria_id: categoriaImportada.id,
-              ambiente_id: ambiente?.id ?? null,
+              categoria_id: preparada.categoria_id,
+              ambiente_id: preparada.ambiente_id,
               nombre: valores.nombre.trim(),
               marca: valores.marca || null,
               modelo: valores.modelo || null,
               numero_serie: valores.numero_serie || null,
               codigo_patrimonial: valores.codigo_patrimonial || null,
               posicion: valores.posicion || null,
-              estado_operativo: estadoNormalizado as EstadoOperativo,
+              estado_operativo: preparada.estado_operativo,
               fecha_adquisicion: fechaCsvAISO(valores.fecha_adquisicion),
               fecha_garantia: fechaCsvAISO(valores.fecha_garantia),
               observaciones: valores.observaciones || null,
@@ -689,7 +511,7 @@ export default function Reportes() {
 
       setResultadoImportacion(resultados)
       const exitosas = resultados.filter((item) => item.endsWith('importada.')).length
-      setAviso(`Importación finalizada: ${exitosas} de ${resultados.length} filas agregadas.`)
+      setAviso(`Importación finalizada: ${exitosas} importadas y ${resultados.length - exitosas} rechazadas.`)
       if (exitosas !== resultados.length) {
         setError('Algunas filas no se importaron; revisa el resultado para ver el motivo de cada una.')
       }
@@ -960,6 +782,7 @@ export default function Reportes() {
           <p className="mt-1 text-sm text-slate-600">
             Descarga la plantilla CSV o importa equipos desde un archivo. Se verifican categorías,
             ambientes, fechas, estados y posibles duplicados antes de agregar cada registro.
+            Si una plantilla antigua incluye características técnicas, agrega esas características desde la ficha después de importar; las filas que las contengan serán rechazadas sin crear el equipo.
           </p>
         </div>
         <div className="mt-4 flex flex-wrap gap-3">

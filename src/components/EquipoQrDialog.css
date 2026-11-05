@@ -1,0 +1,22 @@
+/* Vista previa a tamaño real: en pantallas pequeñas se desplaza, nunca se escala. */
+.qr-hoja-preview {
+  box-sizing: border-box;
+  width: 297mm;
+  height: 210mm;
+  padding: 11.5mm 9.5mm;
+  display: grid;
+  grid-template-columns: repeat(3, 90mm);
+  grid-template-rows: repeat(5, 35mm);
+  column-gap: 4mm;
+  row-gap: 3mm;
+  background: white;
+}
+
+.qr-etiqueta-preview {
+  display: block;
+  width: 90mm;
+  height: 35mm;
+  max-width: none;
+  object-fit: contain;
+  outline: 1px dashed #94a3b8;
+}

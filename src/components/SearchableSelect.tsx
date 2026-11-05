@@ -51,15 +51,12 @@ export default function SearchableSelect({
     function handleClickOutside(event: MouseEvent) {
       if (!containerRef.current?.contains(event.target as Node)) {
         setOpen(false)
+        setQuery('')
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
-
-  useEffect(() => {
-    if (!open) setQuery('')
-  }, [open])
 
   return (
     <div ref={containerRef} className={`relative ${className}`}>
@@ -68,7 +65,11 @@ export default function SearchableSelect({
         <button
           type="button"
           disabled={disabled}
-          onClick={() => !disabled && setOpen((v) => !v)}
+          onClick={() => {
+            if (disabled) return
+            setOpen((v) => !v)
+            setQuery('')
+          }}
           className="flex w-full items-center justify-between rounded-lg border border-slate-300 bg-white px-3 py-2 text-left text-sm disabled:cursor-not-allowed disabled:opacity-50"
         >
           <span className={selected ? 'text-slate-900' : 'text-slate-500'}>
@@ -82,6 +83,7 @@ export default function SearchableSelect({
             onClick={() => {
               onChange('')
               setOpen(false)
+              setQuery('')
             }}
             className="rounded-lg border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50"
           >
@@ -112,6 +114,7 @@ export default function SearchableSelect({
                     onClick={() => {
                       onChange(option.value)
                       setOpen(false)
+              setQuery('')
                     }}
                     className={`w-full px-3 py-2 text-left text-sm hover:bg-slate-50 ${value === option.value ? 'bg-slate-50 font-medium' : ''}`}
                   >

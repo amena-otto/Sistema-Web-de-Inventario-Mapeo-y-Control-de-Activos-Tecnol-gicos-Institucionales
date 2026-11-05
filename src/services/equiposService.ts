@@ -1,13 +1,8 @@
 import { FunctionsHttpError } from '@supabase/supabase-js'
 import { supabase } from './supabaseClient'
 
-export const estadosOperativos = [
-  'operativo',
-  'con_fallas',
-  'en_mantenimiento',
-  'inoperativo',
-  'en_almacen',
-] as const
+import { estadosOperativos, validarEquipo, ejecutarImportacion } from '../utils/inventario'
+export { estadosOperativos } from '../utils/inventario'
 
 export type EstadoOperativo = (typeof estadosOperativos)[number]
 
@@ -336,7 +331,21 @@ export async function obtenerEquipo(id: string): Promise<Equipo> {
   return data as Equipo
 }
 
+async function validarAntesDeGuardar(datos: DatosEquipo) {
+  const errores = validarEquipo(datos)
+  if (Object.keys(errores).length) throw new Error(Object.values(errores).join(' '))
+  const [categoria, ambiente] = await Promise.all([
+    supabase.from('categorias_equipos').select('id').eq('id', datos.categoria_id).eq('activo', true).maybeSingle(),
+    supabase.from('ambientes').select('id').eq('id', datos.ambiente_id).eq('activo', true).maybeSingle(),
+  ])
+  if (categoria.error) throw categoria.error
+  if (ambiente.error) throw ambiente.error
+  if (!categoria.data) throw new Error('La categoría no existe o está inactiva.')
+  if (!ambiente.data) throw new Error('El ambiente no existe o está inactivo.')
+}
+
 export async function crearEquipo(datos: DatosEquipo): Promise<Equipo> {
+  await validarAntesDeGuardar(datos)
   const { data, error } = await supabase
     .from('equipos')
     .insert(datos)
@@ -352,6 +361,7 @@ export async function actualizarEquipo(
   id: string,
   datos: DatosEquipo,
 ): Promise<Equipo> {
+  await validarAntesDeGuardar(datos)
   const { data, error } = await supabase
     .from('equipos')
     .update(datos)
@@ -789,39 +799,7 @@ export async function importarFila(
   serie?: string,
   tecnicas: Record<string, string> = {},
 ): Promise<Equipo> {
-  const duplicados = await posiblesDuplicados(
-    serie ?? '',
-    datos.codigo_patrimonial ?? '',
-    undefined,
-    datos,
-  )
-  if (duplicados.length) {
-    throw new Error(
-      `Posible duplicado de ${duplicados.map((e) => e.codigo_institucional).join(', ')}`,
-    )
-  }
-  const equipo = await crearEquipo(datos)
-  for (const [tipo, capacidad] of Object.entries(tecnicas)) {
-    if (!capacidad.trim()) continue
-    try {
-      await guardarComponente(equipo.id, {
-        tipo,
-        marca: null,
-        modelo: null,
-        capacidad: capacidad.trim(),
-        numero_serie: null,
-        observaciones: null,
-      })
-    } catch (error) {
-      throw new Error(
-        `El equipo ${equipo.codigo_institucional} fue creado, pero falló el componente ${tipo}: ${mostrarErrorServicio(error)}`,
-        { cause: error },
-      )
-    }
-  }
-  return equipo
-}
-
-function mostrarErrorServicio(error: unknown) {
-  return error instanceof Error ? error.message : 'error desconocido'
+  return ejecutarImportacion(datos, tecnicas, async () => posiblesDuplicados(
+    datos.numero_serie ?? serie ?? '', datos.codigo_patrimonial ?? '', undefined, datos,
+  ), crearEquipo)
 }
