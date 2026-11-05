@@ -168,6 +168,8 @@ export async function eliminarCategoria(id: string) {
   if (error) throw error
 }
 
+export type OrdenEquipos = 'codigo' | 'reciente' | 'nombre' | 'estado'
+
 export async function listarEquipos({
   pagina,
   porPagina,
@@ -178,6 +180,7 @@ export async function listarEquipos({
   ambienteId,
   ambienteIds,
   sinUbicacion,
+  orden,
   ordenReciente = false,
 }: {
   pagina: number
@@ -189,6 +192,7 @@ export async function listarEquipos({
   ambienteId: string
   ambienteIds?: string[]
   sinUbicacion?: boolean
+  orden?: OrdenEquipos
   ordenReciente?: boolean
 }) {
   let consulta = supabase
@@ -197,16 +201,35 @@ export async function listarEquipos({
       'id, codigo_institucional, categoria_id, ambiente_id, nombre, marca, modelo, numero_serie, codigo_patrimonial, posicion, responsable_id, estado_operativo, situacion, fecha_adquisicion, fecha_garantia, observaciones, created_at, updated_at',
       { count: 'exact' },
     )
-    .order(ordenReciente ? 'created_at' : 'codigo_institucional', {
-      ascending: !ordenReciente,
-    })
-    .order('codigo_institucional')
-    .range((pagina - 1) * porPagina, pagina * porPagina - 1)
+
+  const criterio = orden ?? (ordenReciente ? 'reciente' : 'codigo')
+  if (criterio === 'reciente') {
+    consulta = consulta
+      .order('created_at', { ascending: false })
+      .order('codigo_institucional')
+  } else if (criterio === 'nombre') {
+    consulta = consulta
+      .order('nombre', { ascending: true })
+      .order('codigo_institucional')
+  } else if (criterio === 'estado') {
+    consulta = consulta
+      .order('estado_operativo', { ascending: true })
+      .order('codigo_institucional')
+  } else {
+    consulta = consulta.order('codigo_institucional', { ascending: true })
+  }
+
+  consulta = consulta.range(
+    (pagina - 1) * porPagina,
+    pagina * porPagina - 1,
+  )
 
   if (busqueda) {
     const seguro = busqueda.replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑüÜ\s_-]/g, '').trim()
-    if (seguro) {
-      const patron = `*${seguro}*`
+    // Cada palabra debe aparecer en alguno de los campos consultados. Así
+    // "lenovo thinkpad" encuentra el equipo aunque los datos estén separados.
+    for (const termino of seguro.split(/\s+/).filter(Boolean).slice(0, 6)) {
+      const patron = `*${termino}*`
       consulta = consulta.or(
         `codigo_institucional.ilike.${patron},nombre.ilike.${patron},marca.ilike.${patron},modelo.ilike.${patron},numero_serie.ilike.${patron},codigo_patrimonial.ilike.${patron}`,
       )

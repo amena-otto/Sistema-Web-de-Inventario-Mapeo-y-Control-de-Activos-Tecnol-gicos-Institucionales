@@ -96,8 +96,8 @@ export async function dibujarEtiquetaQr(equipo: EquipoEtiqueta, logo: HTMLImageE
     ctx.font = `${tamano}px Arial, sans-serif`
     return ctx.measureText(valor).width
   }
-  const datos = ajustarDatosEtiqueta(equipo.nombre, equipo.codigo_institucional, alto, medir)
-  for (const [bloque, inicio] of [[datos.nombre, datos.nombreY], [datos.codigo, datos.codigoY]] as const) {
+  const datos = ajustarDatosEtiqueta(equipo.nombre, equipo.codigo_institucional, alto, medir, equipo.numero_serie)
+  for (const [bloque, inicio] of [[datos.nombre, datos.nombreY], [datos.codigo, datos.codigoY], [datos.serie, datos.serieY]] as const) {
     ctx.font = `${bloque.tamano}px Arial, sans-serif`
     bloque.lineas.forEach((linea, indice) => ctx.fillText(linea, 32, inicio + indice * bloque.interlineado))
   }
