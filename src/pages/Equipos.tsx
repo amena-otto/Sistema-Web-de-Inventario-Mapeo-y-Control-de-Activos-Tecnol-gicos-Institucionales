@@ -14,14 +14,6 @@ import {
   POR_PAGINA_PREDETERMINADO,
   type PorPagina,
 } from '../utils/paginacion'
-import {
-  contarFiltrosActivos,
-  idsAmbientesDeSeleccion,
-  opcionesAmbiente,
-  opcionesPabellon,
-  opcionesPiso,
-  resolverSeleccionUbicacion,
-} from '../utils/filtrosEquipos'
 import { listarHistorialMovimientos, type Movimiento } from '../services/movimientosService'
 import { listarMantenimientos, type Mantenimiento } from '../services/mantenimientosService'
 import { usePermissions } from '../hooks/usePermissions'
@@ -130,30 +122,6 @@ function formatoPeso(bytes: number) {
     : `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-function ChipFiltro({
-  etiqueta,
-  onQuitar,
-}: {
-  etiqueta: string
-  onQuitar: () => void
-}) {
-  return (
-    <span className="inline-flex max-w-full items-center gap-1 rounded-full border border-orange-200 bg-orange-50 py-1 pl-3 pr-1 text-xs font-medium text-orange-900">
-      <span className="min-w-0 break-words">{etiqueta}</span>
-      <button
-        type="button"
-        onClick={onQuitar}
-        aria-label={`Quitar filtro ${etiqueta}`}
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-orange-800 transition hover:bg-orange-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500"
-      >
-        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" className="h-3.5 w-3.5">
-          <path d="m7 7 10 10M17 7 7 17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-        </svg>
-      </button>
-    </span>
-  )
-}
-
 export default function Equipos() {
   const { can } = usePermissions()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -164,7 +132,6 @@ export default function Equipos() {
   const puedeVerMantenimientos = can('mantenimientos.ver')
   const puedeVerMovimientos = can('movimientos.ver')
   const [categorias, setCategorias] = useState<Categoria[]>([])
-  const [catalogosListos, setCatalogosListos] = useState(false)
   const [erroresCampos, setErroresCampos] = useState<ReturnType<typeof validarEquipo>>({})
   const [ambientes, setAmbientes] = useState<Ambiente[]>([])
   const [responsables, setResponsables] = useState<Responsable[]>([])
@@ -188,19 +155,9 @@ export default function Equipos() {
   const [estado, setEstado] = useState(() => searchParams.get('estado') ?? '')
   const verEquiposDadosDeBaja = estado === 'baja'
   const [categoriaFiltro, setCategoriaFiltro] = useState(() => searchParams.get('categoria') ?? '')
-  const [pabellonFiltro, setPabellonFiltro] = useState(() => searchParams.get('pabellon') ?? '')
-  const [pisoFiltro, setPisoFiltro] = useState(() => searchParams.get('piso') ?? '')
   const [ambienteFiltro, setAmbienteFiltro] = useState(() => searchParams.get('ambiente') ?? '')
   const [ambienteFiltrosIds, setAmbienteFiltrosIds] = useState(() => searchParams.getAll('ambientes'))
   const [sinUbicacionFiltro, setSinUbicacionFiltro] = useState(() => searchParams.get('sinUbicacion') === 'true')
-  const [mostrarMasFiltros, setMostrarMasFiltros] = useState(
-    () =>
-      Boolean(
-        searchParams.get('pabellon') ||
-          searchParams.get('piso') ||
-          searchParams.get('ambiente'),
-      ),
-  )
   const [claveListado, setClaveListado] = useState('')
   const [errorListado, setErrorListado] = useState('')
   const [error, setError] = useState('')
@@ -316,7 +273,6 @@ export default function Equipos() {
         setCategorias(catalogos.categorias)
         setAmbientes(catalogos.ambientes)
         setResponsables(catalogos.responsables)
-        setCatalogosListos(true)
       })
       .catch((e: unknown) => {
         if (vigente) setError(mostrarError(e, 'No se pudieron cargar los catálogos.'))
@@ -325,37 +281,6 @@ export default function Equipos() {
       vigente = false
     }
   }, [])
-
-  const seleccionUbicacion = useMemo(
-    () =>
-      resolverSeleccionUbicacion(
-        {
-          pabellon: pabellonFiltro,
-          piso: pisoFiltro,
-          ambiente: ambienteFiltro,
-        },
-        ambientes,
-      ),
-    [pabellonFiltro, pisoFiltro, ambienteFiltro, ambientes],
-  )
-  const pabellonesDisponibles = useMemo(
-    () => opcionesPabellon(ambientes),
-    [ambientes],
-  )
-  const pisosDisponibles = useMemo(
-    () => opcionesPiso(ambientes, seleccionUbicacion.pabellon),
-    [ambientes, seleccionUbicacion.pabellon],
-  )
-  const ambientesDisponibles = useMemo(
-    () => opcionesAmbiente(ambientes, seleccionUbicacion.piso),
-    [ambientes, seleccionUbicacion.piso],
-  )
-  const idsUbicacion = useMemo(() => {
-    if (seleccionUbicacion.pabellon) {
-      return idsAmbientesDeSeleccion(seleccionUbicacion, ambientes)
-    }
-    return ambienteFiltrosIds.length ? ambienteFiltrosIds : undefined
-  }, [seleccionUbicacion, ambientes, ambienteFiltrosIds])
 
   const claveConsulta = useMemo(
     () =>
@@ -367,10 +292,8 @@ export default function Equipos() {
         estado,
         verEquiposDadosDeBaja,
         categoriaFiltro,
-        seleccionUbicacion.pabellon,
-        seleccionUbicacion.piso,
-        seleccionUbicacion.ambiente,
-        idsUbicacion,
+        ambienteFiltro,
+        ambienteFiltrosIds,
         sinUbicacionFiltro,
         actualizacion,
       ]),
@@ -382,8 +305,8 @@ export default function Equipos() {
       estado,
       verEquiposDadosDeBaja,
       categoriaFiltro,
-      seleccionUbicacion,
-      idsUbicacion,
+      ambienteFiltro,
+      ambienteFiltrosIds,
       sinUbicacionFiltro,
       actualizacion,
     ],
@@ -408,8 +331,8 @@ export default function Equipos() {
             ? undefined
             : 'activo',
       categoriaId: categoriaFiltro,
-      ambienteId: seleccionUbicacion.ambiente,
-      ambienteIds: idsUbicacion,
+      ambienteId: ambienteFiltro,
+      ambienteIds: ambienteFiltrosIds.length ? ambienteFiltrosIds : undefined,
       sinUbicacion: sinUbicacionFiltro,
       orden,
     })
@@ -444,8 +367,8 @@ export default function Equipos() {
     estado,
     verEquiposDadosDeBaja,
     categoriaFiltro,
-    seleccionUbicacion,
-    idsUbicacion,
+    ambienteFiltro,
+    ambienteFiltrosIds,
     sinUbicacionFiltro,
     actualizacion,
   ])
@@ -453,9 +376,6 @@ export default function Equipos() {
   // Mantiene la URL sincronizada para que el dashboard y los enlaces
   // compartidos reproduzcan la misma vista y los mismos filtros.
   useEffect(() => {
-    // Espera al catálogo para no borrar selecciones de ubicación que todavía
-    // no se pueden resolver (por ejemplo, enlaces del dashboard).
-    if (!catalogosListos) return
     setSearchParams(
       (actuales) => {
         const parametros = new URLSearchParams(actuales)
@@ -466,9 +386,7 @@ export default function Equipos() {
         asignar('busqueda', busqueda.trim())
         asignar('estado', estado)
         asignar('categoria', categoriaFiltro)
-        asignar('pabellon', seleccionUbicacion.pabellon)
-        asignar('piso', seleccionUbicacion.piso)
-        asignar('ambiente', seleccionUbicacion.ambiente)
+        asignar('ambiente', ambienteFiltro)
         asignar(
           'porPagina',
           porPagina === POR_PAGINA_PREDETERMINADO ? '' : String(porPagina),
@@ -487,32 +405,21 @@ export default function Equipos() {
     busqueda,
     estado,
     categoriaFiltro,
-    seleccionUbicacion,
+    ambienteFiltro,
     porPagina,
     pagina,
     orden,
     ambienteFiltrosIds,
     sinUbicacionFiltro,
-    catalogosListos,
     setSearchParams,
   ])
 
   const rangoVisible = calcularRangoVisible(pagina, porPagina, total)
-  const filtrosActivos = contarFiltrosActivos({
-    busqueda,
-    estado: verEquiposDadosDeBaja ? '' : estado,
-    categoria: categoriaFiltro,
-    pabellon: seleccionUbicacion.pabellon,
-    piso: seleccionUbicacion.piso,
-    ambiente: seleccionUbicacion.ambiente,
-    sinUbicacion: sinUbicacionFiltro,
-    ambientesDashboard: ambienteFiltrosIds,
-  })
   const filtrosAplicados =
     Boolean(busqueda.trim()) ||
     Boolean(estado && !verEquiposDadosDeBaja) ||
     Boolean(categoriaFiltro) ||
-    Boolean(seleccionUbicacion.pabellon) ||
+    Boolean(ambienteFiltro) ||
     sinUbicacionFiltro ||
     ambienteFiltrosIds.length > 0
 
@@ -576,37 +483,11 @@ export default function Equipos() {
     setEstado(verDadosDeBaja ? 'baja' : '')
   }, [])
 
-  function cambiarPabellon(valor: string) {
-    setPabellonFiltro(valor)
-    setPisoFiltro('')
-    setAmbienteFiltro('')
-    setAmbienteFiltrosIds([])
-    setSinUbicacionFiltro(false)
-    setPagina(1)
-  }
-
-  function cambiarPiso(valor: string) {
-    setPisoFiltro(valor)
-    setAmbienteFiltro('')
-    setAmbienteFiltrosIds([])
-    setSinUbicacionFiltro(false)
-    setPagina(1)
-  }
-
-  function cambiarAmbiente(valor: string) {
-    setAmbienteFiltro(valor)
-    setAmbienteFiltrosIds([])
-    setSinUbicacionFiltro(false)
-    setPagina(1)
-  }
-
   function limpiarFiltros() {
     setBusqueda('')
     // Conserva la vista de equipos dados de baja al limpiar los criterios.
     setEstado((actual) => (actual === 'baja' ? 'baja' : ''))
     setCategoriaFiltro('')
-    setPabellonFiltro('')
-    setPisoFiltro('')
     setAmbienteFiltro('')
     setAmbienteFiltrosIds([])
     setSinUbicacionFiltro(false)
@@ -1330,246 +1211,96 @@ export default function Equipos() {
           Equipos dados de baja
         </button>
       </div>
-      <div className="mt-5 min-w-0 rounded-xl bg-white p-3 shadow sm:p-4">
-        <div className="grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
-          <div className="min-w-0">
-            <label htmlFor="buscar-equipos" className="sr-only">
-              Buscar en inventario
-            </label>
-            <div className="relative">
-              <svg
-                aria-hidden="true"
-                viewBox="0 0 24 24"
-                fill="none"
-                className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400"
-              >
-                <circle cx="10.5" cy="10.5" r="6.5" stroke="currentColor" strokeWidth="1.8" />
-                <path d="m15.5 15.5 4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-              </svg>
-              <input
-                id="buscar-equipos"
-                type="search"
-                value={busqueda}
-                onChange={(event) => {
-                  setBusqueda(event.target.value)
-                  setPagina(1)
-                }}
-                placeholder="Código, nombre, serie, marca, modelo o patrimonial"
-                className="min-h-11 w-full rounded-lg border border-slate-300 bg-white py-2.5 pl-10 pr-10 text-sm text-slate-800 placeholder:text-slate-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500"
-              />
-              {busqueda && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setBusqueda('')
-                    setPagina(1)
-                  }}
-                  aria-label="Limpiar búsqueda"
-                  className="absolute right-1 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500"
-                >
-                  <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" className="h-4 w-4">
-                    <path d="m7 7 10 10M17 7 7 17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                  </svg>
-                </button>
-              )}
-            </div>
-          </div>
+      <div className="mt-5 grid min-w-0 gap-3 rounded-xl bg-white p-3 shadow sm:grid-cols-2 sm:p-4 lg:grid-cols-4">
+        <input
+          type="search"
+          value={busqueda}
+          onChange={(event) => {
+            setBusqueda(event.target.value)
+            setPagina(1)
+          }}
+          placeholder="Código, serie, marca o equipo"
+          aria-label="Buscar en inventario"
+          className="min-w-0 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"
+        />
+        <select
+          value={categoriaFiltro}
+          onChange={(event) => {
+            setCategoriaFiltro(event.target.value)
+            setPagina(1)
+          }}
+          aria-label="Filtrar por categoría"
+          className="min-w-0 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"
+        >
+          <option value="">Todas las categorías</option>
+          {categorias.map((categoria) => (
+            <option key={categoria.id} value={categoria.id}>{categoria.nombre}</option>
+          ))}
+        </select>
+        <select
+          value={ambienteFiltro}
+          onChange={(event) => {
+            setAmbienteFiltro(event.target.value)
+            setAmbienteFiltrosIds([])
+            setSinUbicacionFiltro(false)
+            setPagina(1)
+          }}
+          aria-label="Filtrar por ubicación"
+          className="min-w-0 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"
+        >
+          <option value="">Todas las ubicaciones</option>
+          {ambientes.map((ambiente) => (
+            <option key={ambiente.id} value={ambiente.id}>
+              {ambiente.pabellon} / {ambiente.piso} / {ambiente.codigo} — {ambiente.nombre}
+            </option>
+          ))}
+        </select>
+        <select
+          value={verEquiposDadosDeBaja ? 'baja' : estado}
+          disabled={verEquiposDadosDeBaja}
+          onChange={(event) => {
+            setEstado(event.target.value)
+            setPagina(1)
+          }}
+          aria-label="Filtrar por estado"
+          className="min-w-0 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"
+        >
+          {verEquiposDadosDeBaja
+            ? <option value="baja">Equipos dados de baja</option>
+            : <option value="">Todos los equipos activos</option>}
+          {estadosOperativos.map((opcion) => (
+            <option key={opcion} value={opcion}>{etiquetasEstado[opcion]}</option>
+          ))}
+          {!verEquiposDadosDeBaja && <option value="archivado">Archivado</option>}
+        </select>
+      </div>
 
-          <label className="min-w-0 text-sm font-medium text-slate-700">
-            Estado
-            <select
-              value={verEquiposDadosDeBaja ? 'baja' : estado}
-              disabled={verEquiposDadosDeBaja}
-              onChange={(event) => {
-                setEstado(event.target.value)
-                setPagina(1)
-              }}
-              className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500 disabled:bg-slate-100 disabled:text-slate-600"
-            >
-              {verEquiposDadosDeBaja
-                ? <option value="baja">Equipos dados de baja</option>
-                : <option value="">Todos los equipos activos</option>}
-              {estadosOperativos.map((opcion) => (
-                <option key={opcion} value={opcion}>{etiquetasEstado[opcion]}</option>
-              ))}
-              {!verEquiposDadosDeBaja && <option value="archivado">Archivado</option>}
-            </select>
-          </label>
-
-          <label className="min-w-0 text-sm font-medium text-slate-700">
-            Categoría
-            <select
-              value={categoriaFiltro}
-              onChange={(event) => {
-                setCategoriaFiltro(event.target.value)
-                setPagina(1)
-              }}
-              className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500"
-            >
-              <option value="">Todas las categorías</option>
-              {categorias.map((categoria) => (
-                <option key={categoria.id} value={categoria.id}>{categoria.nombre}</option>
-              ))}
-            </select>
-          </label>
-
+      {(ambienteFiltrosIds.length > 0 || sinUbicacionFiltro) && (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-900">
+          <span>
+            {sinUbicacionFiltro
+              ? 'Equipos sin ubicación asignada'
+              : `Inventario filtrado por ${ambienteFiltrosIds.length} ambiente(s) del dashboard`}
+          </span>
           <button
             type="button"
-            onClick={() => setMostrarMasFiltros((actual) => !actual)}
-            aria-expanded={mostrarMasFiltros}
-            aria-controls="filtros-ubicacion"
-            className="flex min-h-11 items-center justify-center gap-2 self-end rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500"
+            onClick={() => {
+              setAmbienteFiltrosIds([])
+              setSinUbicacionFiltro(false)
+              setPagina(1)
+            }}
+            className="font-semibold text-orange-800 hover:underline"
           >
-            Más filtros
-            {filtrosActivos > 0 && (
-              <span className="inline-flex min-w-6 items-center justify-center rounded-full bg-orange-700 px-1.5 py-0.5 text-xs font-bold text-white">
-                {filtrosActivos}
-                <span className="sr-only"> filtros activos</span>
-              </span>
-            )}
-            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" className={`h-4 w-4 transition ${mostrarMasFiltros ? 'rotate-180' : ''}`}>
-              <path d="m7 10 5 5 5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
+            Quitar filtro
           </button>
         </div>
-
-        {mostrarMasFiltros && (
-          <div id="filtros-ubicacion" className="mt-3 grid min-w-0 gap-3 border-t border-slate-100 pt-3 sm:grid-cols-3">
-            <label className="min-w-0 text-sm font-medium text-slate-700">
-              Pabellón
-              <select
-                value={seleccionUbicacion.pabellon}
-                onChange={(event) => cambiarPabellon(event.target.value)}
-                className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500"
-              >
-                <option value="">Todos los pabellones</option>
-                {pabellonesDisponibles.map((opcion) => (
-                  <option key={opcion.id} value={opcion.id}>{opcion.nombre}</option>
-                ))}
-              </select>
-            </label>
-            <label className="min-w-0 text-sm font-medium text-slate-700">
-              Piso
-              <select
-                value={seleccionUbicacion.piso}
-                disabled={!seleccionUbicacion.pabellon}
-                onChange={(event) => cambiarPiso(event.target.value)}
-                className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500 disabled:bg-slate-100 disabled:text-slate-500"
-              >
-                <option value="">Todos los pisos</option>
-                {pisosDisponibles.map((opcion) => (
-                  <option key={opcion.id} value={opcion.id}>{opcion.nombre}</option>
-                ))}
-              </select>
-            </label>
-            <label className="min-w-0 text-sm font-medium text-slate-700">
-              Ambiente
-              <select
-                value={seleccionUbicacion.ambiente}
-                disabled={!seleccionUbicacion.piso}
-                onChange={(event) => cambiarAmbiente(event.target.value)}
-                className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500 disabled:bg-slate-100 disabled:text-slate-500"
-              >
-                <option value="">Todos los ambientes</option>
-                {ambientesDisponibles.map((opcion) => (
-                  <option key={opcion.id} value={opcion.id}>{opcion.codigo} — {opcion.nombre}</option>
-                ))}
-              </select>
-            </label>
-            <p className="text-xs text-slate-500 sm:col-span-3">
-              El piso depende del pabellón y el ambiente del piso. Al cambiar un nivel se limpian las selecciones inferiores.
-            </p>
-          </div>
-        )}
-
-        {filtrosActivos > 0 && (
-          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
-            <span className="text-sm font-medium text-slate-700">Filtros activos:</span>
-            {busqueda.trim() && (
-              <ChipFiltro
-                etiqueta={`Búsqueda: “${busqueda.trim()}”`}
-                onQuitar={() => {
-                  setBusqueda('')
-                  setPagina(1)
-                }}
-              />
-            )}
-            {estado && !verEquiposDadosDeBaja && (
-              <ChipFiltro
-                etiqueta={`Estado: ${estado === 'archivado' ? 'Archivado' : etiquetasEstado[estado as EstadoOperativo] ?? estado}`}
-                onQuitar={() => {
-                  setEstado('')
-                  setPagina(1)
-                }}
-              />
-            )}
-            {categoriaFiltro && (
-              <ChipFiltro
-                etiqueta={`Categoría: ${categoriasPorId.get(categoriaFiltro) ?? categoriaFiltro}`}
-                onQuitar={() => {
-                  setCategoriaFiltro('')
-                  setPagina(1)
-                }}
-              />
-            )}
-            {seleccionUbicacion.pabellon && (
-              <ChipFiltro
-                etiqueta={`Pabellón: ${pabellonesDisponibles.find((opcion) => opcion.id === seleccionUbicacion.pabellon)?.nombre ?? 'Seleccionado'}`}
-                onQuitar={() => cambiarPabellon('')}
-              />
-            )}
-            {seleccionUbicacion.piso && (
-              <ChipFiltro
-                etiqueta={`Piso: ${pisosDisponibles.find((opcion) => opcion.id === seleccionUbicacion.piso)?.nombre ?? 'Seleccionado'}`}
-                onQuitar={() => cambiarPiso('')}
-              />
-            )}
-            {seleccionUbicacion.ambiente && (
-              <ChipFiltro
-                etiqueta={`Ambiente: ${ambientesDisponibles.find((opcion) => opcion.id === seleccionUbicacion.ambiente)?.codigo ?? 'Seleccionado'}`}
-                onQuitar={() => cambiarAmbiente('')}
-              />
-            )}
-            {sinUbicacionFiltro && (
-              <ChipFiltro
-                etiqueta="Sin ubicación asignada"
-                onQuitar={() => {
-                  setSinUbicacionFiltro(false)
-                  setPagina(1)
-                }}
-              />
-            )}
-            {ambienteFiltrosIds.length > 0 && (
-              <ChipFiltro
-                etiqueta={`Dashboard: ${ambienteFiltrosIds.length} ambiente(s)`}
-                onQuitar={() => {
-                  setAmbienteFiltrosIds([])
-                  setSinUbicacionFiltro(false)
-                  setPagina(1)
-                }}
-              />
-            )}
-            <button
-              type="button"
-              onClick={limpiarFiltros}
-              className="ml-auto min-h-9 rounded-lg px-3 py-1.5 text-sm font-semibold text-orange-800 underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500"
-            >
-              Limpiar filtros
-            </button>
-          </div>
-        )}
-      </div>
+      )}
 
       <div className="mt-4 min-w-0 overflow-hidden rounded-xl bg-white shadow" aria-busy={cargando}>
         <div className="flex flex-col items-stretch justify-between gap-3 border-b border-slate-100 px-3 py-3 sm:flex-row sm:items-center sm:px-4">
-          <div className="min-w-0">
-            <h2 className="min-w-0 font-semibold text-slate-800">
-              {verEquiposDadosDeBaja ? 'Equipos dados de baja' : 'Equipos registrados'}
-            </h2>
-            <p className="mt-0.5 text-xs text-slate-500">
-              {cargando ? 'Actualizando resultados…' : `${total} resultado(s) encontrado(s)`}
-            </p>
-          </div>
+          <h2 className="min-w-0 font-semibold text-slate-800">
+            {verEquiposDadosDeBaja ? 'Equipos dados de baja' : 'Equipos registrados'}
+          </h2>
           <label className="flex shrink-0 flex-col gap-1 text-sm font-medium text-slate-700 sm:flex-row sm:items-center sm:gap-2">
             Ordenar por
             <select
@@ -1587,6 +1318,19 @@ export default function Equipos() {
               ))}
             </select>
           </label>
+        </div>
+        <div className="border-b border-slate-100 px-3 py-3 sm:px-4">
+          <Paginacion
+            rango={rangoVisible}
+            porPagina={porPagina}
+            cargando={cargando}
+            sustantivo="equipos"
+            onCambiarPagina={setPagina}
+            onCambiarPorPagina={(nuevo) => {
+              setPorPagina(normalizarPorPagina(nuevo))
+              setPagina(1)
+            }}
+          />
         </div>
         <div className="flex flex-wrap items-center gap-3 border-b border-slate-100 bg-blue-50/50 px-4 py-3">
           <label className="flex min-h-9 items-center gap-2 text-sm text-slate-700">
@@ -1778,17 +1522,6 @@ export default function Equipos() {
           </table>
         </div>
       </div>
-      <Paginacion
-        rango={rangoVisible}
-        porPagina={porPagina}
-        cargando={cargando}
-        sustantivo="equipos"
-        onCambiarPagina={setPagina}
-        onCambiarPorPagina={(nuevo) => {
-          setPorPagina(normalizarPorPagina(nuevo))
-          setPagina(1)
-        }}
-      />
 
       {categoriaModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">

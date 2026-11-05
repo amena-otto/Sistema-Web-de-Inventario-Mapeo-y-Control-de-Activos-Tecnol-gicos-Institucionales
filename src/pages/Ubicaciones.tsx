@@ -462,7 +462,6 @@ export default function Ubicaciones() {
                 <h3 className="font-semibold">{ambienteElegido ? 'Equipos del ambiente' : 'Equipos del piso'}</h3>
                 <p className="text-xs text-slate-500">La ubicación se obtiene de la relación del equipo con su ambiente.</p>
               </div>
-              <span role="status" aria-live="polite" className="text-sm text-slate-500">{equiposVisibles.length} resultado(s) encontrado(s)</span>
             </div>
             <div className="flex flex-col gap-2 border-b p-4 sm:flex-row sm:items-end">
               <label className="min-w-0 flex-1 text-sm font-medium text-slate-700" htmlFor="buscar-equipos-ubicacion">Buscar equipos en esta selección
@@ -477,6 +476,22 @@ export default function Ubicaciones() {
               </label>
               <button type="button" disabled={!busqueda} onClick={() => cambiarBusqueda('')} className="min-h-10 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 disabled:opacity-50">Limpiar búsqueda</button>
             </div>
+
+            {equiposVisibles.length > 0 && (
+              <div className="border-b border-slate-100 px-4 py-3">
+                <Paginacion
+                  rango={rangoEquipos}
+                  porPagina={porPaginaEquipos}
+                  cargando={cargando}
+                  sustantivo="equipos"
+                  onCambiarPagina={setPaginaEquipos}
+                  onCambiarPorPagina={(nuevo) => {
+                    setPorPaginaEquipos(normalizarPorPagina(nuevo))
+                    setPaginaEquipos(1)
+                  }}
+                />
+              </div>
+            )}
 
             {equiposVisibles.length === 0 ? (
               <EstadoVacio
@@ -555,20 +570,6 @@ export default function Ubicaciones() {
                       })}
                     </tbody>
                   </table>
-                </div>
-
-                <div className="border-t border-slate-100 p-3">
-                  <Paginacion
-                    rango={rangoEquipos}
-                    porPagina={porPaginaEquipos}
-                    cargando={cargando}
-                    sustantivo="equipos"
-                    onCambiarPagina={setPaginaEquipos}
-                    onCambiarPorPagina={(nuevo) => {
-                      setPorPaginaEquipos(normalizarPorPagina(nuevo))
-                      setPaginaEquipos(1)
-                    }}
-                  />
                 </div>
               </>
             )}
