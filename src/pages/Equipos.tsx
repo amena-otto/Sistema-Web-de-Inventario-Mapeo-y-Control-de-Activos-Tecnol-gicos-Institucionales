@@ -1521,6 +1521,19 @@ export default function Equipos() {
             </tbody>
           </table>
         </div>
+        {total > 0 && !errorListado && (
+          <div className="border-t border-slate-100 px-3 py-3 sm:px-4">
+            <Paginacion
+              rango={rangoVisible}
+              porPagina={porPagina}
+              cargando={cargando}
+              sustantivo="equipos"
+              soloNavegacion
+              ariaLabel="Paginación inferior de equipos"
+              onCambiarPagina={setPagina}
+            />
+          </div>
+        )}
       </div>
 
       {categoriaModal && (

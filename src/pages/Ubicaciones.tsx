@@ -571,6 +571,18 @@ export default function Ubicaciones() {
                     </tbody>
                   </table>
                 </div>
+
+                <div className="border-t border-slate-100 px-4 py-3">
+                  <Paginacion
+                    rango={rangoEquipos}
+                    porPagina={porPaginaEquipos}
+                    cargando={cargando}
+                    sustantivo="equipos"
+                    soloNavegacion
+                    ariaLabel="Paginación inferior de equipos"
+                    onCambiarPagina={setPaginaEquipos}
+                  />
+                </div>
               </>
             )}
           </section>
