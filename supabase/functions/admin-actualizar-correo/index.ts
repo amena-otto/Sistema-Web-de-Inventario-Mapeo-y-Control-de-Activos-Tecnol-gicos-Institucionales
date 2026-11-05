@@ -52,14 +52,9 @@ Deno.serve(async (request: Request) => {
     }
     if (
       email.length > 254 ||
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
-      (!email.endsWith('@ottotonsmann.edu.pe') &&
-        !email.endsWith('@gmail.com'))
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
     ) {
-      return respuesta(
-        { error: 'Usa un correo válido @ottotonsmann.edu.pe o @gmail.com.' },
-        400,
-      )
+      return respuesta({ error: 'Usa un correo válido.' }, 400)
     }
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')

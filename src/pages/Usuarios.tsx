@@ -214,13 +214,6 @@ export default function Usuarios() {
       setError('Ingresa un correo válido.')
       return
     }
-    if (
-      !email.endsWith('@ottotonsmann.edu.pe') &&
-      !email.endsWith('@gmail.com')
-    ) {
-      setError('Usa un correo @ottotonsmann.edu.pe o @gmail.com.')
-      return
-    }
     if (email === u.email.toLowerCase()) {
       setError('El correo ingresado es igual al correo actual.')
       return
