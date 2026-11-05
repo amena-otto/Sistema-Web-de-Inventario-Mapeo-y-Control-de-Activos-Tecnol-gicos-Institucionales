@@ -154,6 +154,20 @@ export async function crearCategoria(nombre: string): Promise<Categoria> {
   return data as Categoria
 }
 
+export async function eliminarCategoria(id: string) {
+  const { count, error: consultaError } = await supabase
+    .from('equipos')
+    .select('id', { count: 'exact', head: true })
+    .eq('categoria_id', id)
+  if (consultaError) throw consultaError
+  if (count) {
+    throw new Error('No se puede eliminar: primero reasigna los equipos de esta categoría.')
+  }
+
+  const { error } = await supabase.from('categorias_equipos').delete().eq('id', id)
+  if (error) throw error
+}
+
 export async function listarEquipos({
   pagina,
   porPagina,

@@ -112,11 +112,8 @@ export default function Usuarios() {
     setError('')
     setAviso('')
     const email = nuevoEmail.trim().toLowerCase()
-    if (
-      !email.endsWith('@ottotonsmann.edu.pe') &&
-      !email.endsWith('@gmail.com')
-    ) {
-      setError('Usa un correo @ottotonsmann.edu.pe o @gmail.com.')
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setError('Ingresa un correo válido.')
       return
     }
     const errorClave = errorPassword(passwordInicial)
@@ -302,7 +299,7 @@ export default function Usuarios() {
     <section>
       <h2 className="text-2xl font-semibold">Usuarios</h2>
       <p className="mt-1 text-sm text-slate-600">
-        Crea cuentas directamente con rol y contraseña inicial. Se aceptan correos institucionales y Gmail para pruebas.
+        Crea cuentas directamente con rol y contraseña inicial. Se acepta cualquier correo electrónico válido.
       </p>
 
       <form
@@ -317,10 +314,9 @@ export default function Usuarios() {
             autoComplete="email"
             required
             maxLength={254}
-            pattern="[A-Za-z0-9._%+-]+@(ottotonsmann[.]edu[.]pe|gmail[.]com)"
             value={nuevoEmail}
             onChange={(event) => setNuevoEmail(event.target.value.toLowerCase())}
-            placeholder="usuario@gmail.com o correo institucional"
+            placeholder="usuario@dominio.com"
             aria-label="Correo del nuevo usuario"
             className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
           />

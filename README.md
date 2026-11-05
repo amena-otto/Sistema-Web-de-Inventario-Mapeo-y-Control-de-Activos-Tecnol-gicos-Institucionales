@@ -36,9 +36,9 @@ y el secreto `APP_URL` de Supabase.
 ## Configuración de autenticación
 
 - Habilita el proveedor de correo y contraseña en Supabase Auth.
-- Las invitaciones aceptan direcciones `@ottotonsmann.edu.pe` y `@gmail.com`
-  para facilitar pruebas; ambos dominios se validan en la aplicación y en la
-  Edge Function `admin-crear-usuario`.
+- La creación de usuarios acepta cualquier dirección de correo electrónico
+  válida; el formato se valida en la aplicación y en la Edge Function
+  `admin-crear-usuario`.
 - Configura la URL del sitio y las URL de redirección permitidas para el
   entorno; incluye `/restablecer-password` para el enlace de recuperación.
   Para producción, `Site URL` debe ser
