@@ -2,7 +2,6 @@ import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2'
 import { dividirEnLotes } from '../_shared/lotes.ts'
 import {
   estadoLimpiezaDesdePendiente,
-  extraerArchivosEquipo,
   quitarArchivos,
   resumirLimpieza,
   type EliminacionPendiente,
@@ -45,10 +44,6 @@ function respuesta(body: Record<string, unknown>, status = 200) {
   })
 }
 
-function esTablaAusente(error: ErrorPostgrest): boolean {
-  return error?.code === '42P01' || error?.code === 'PGRST205'
-}
-
 function resumenNoVerificado(detalle: string): ResumenLimpieza {
   return {
     limpiezaCompleta: false,
@@ -63,12 +58,16 @@ async function actualizarPendiente(
   adminClient: SupabaseClient,
   equipoId: string,
   valores: Record<string, unknown>,
+  bloqueoToken: string,
 ): Promise<ErrorPostgrest> {
-  const { error } = await adminClient
+  const { data, error } = await adminClient
     .from('eliminaciones_pendientes')
     .update({ ...valores, actualizado_at: new Date().toISOString() })
     .eq('equipo_id', equipoId)
-  return error
+    .eq('bloqueo_token', bloqueoToken)
+    .select('equipo_id')
+    .maybeSingle()
+  return error ?? (data ? null : { message: 'El bloqueo de limpieza ya no pertenece a esta solicitud.' })
 }
 
 /**
@@ -78,12 +77,13 @@ async function actualizarPendiente(
  * fallo de Storage o Drive no revierte la eliminación: se devuelve una
  * advertencia y la fila de eliminaciones_pendientes queda para el reintento.
  */
-async function finalizarLimpieza(
+async function procesarLimpieza(
   adminClient: SupabaseClient,
   supabaseUrl: string,
   anonKey: string,
   token: string,
   equipoId: string,
+  bloqueoToken: string,
 ): Promise<ResumenLimpieza> {
   const sinPendientes: ResumenLimpieza = {
     limpiezaCompleta: true,
@@ -98,12 +98,6 @@ async function finalizarLimpieza(
     .maybeSingle()
 
   if (error) {
-    if (esTablaAusente(error)) {
-      console.warn(
-        'La tabla eliminaciones_pendientes no existe todavía; no hay archivos registrados que limpiar.',
-      )
-      return sinPendientes
-    }
     console.error('No se pudo consultar la limpieza pendiente:', error.message)
     return resumenNoVerificado('no se pudo leer eliminaciones_pendientes')
   }
@@ -121,7 +115,12 @@ async function finalizarLimpieza(
     if (rutasStorage.length === 0) {
       storageLimpiado = true
     } else {
-      for (const lote of dividirEnLotes(rutasStorage, TAMANO_LOTE_ARCHIVOS)) {
+      for (const lote of dividirEnLotes(rutasStorage, TAMANO_LOTE_ARCHIVOS).slice(0, 2)) {
+        const { data: referencias, error: referenciasError } = await adminClient
+          .from('fotografias_equipos').select('id').in('ruta_storage', lote).limit(1)
+        if (referenciasError || referencias?.length) {
+          return resumenNoVerificado('una ruta sigue referenciada o no se pudo verificar')
+        }
         const { error: storageError } = await adminClient.storage
           .from('fotografias-equipos')
           .remove(lote)
@@ -140,13 +139,13 @@ async function finalizarLimpieza(
         const marcaError = await actualizarPendiente(adminClient, equipoId, {
           rutas_storage: rutasStorage,
           storage_limpiado: storageLimpiado,
-        })
+        }, bloqueoToken)
         if (marcaError) {
           console.error(
             'No se pudo registrar el avance de Storage:',
             marcaError.message,
           )
-          break
+          return resumenNoVerificado('no se pudo guardar el progreso')
         }
       }
     }
@@ -155,12 +154,13 @@ async function finalizarLimpieza(
       const marcaError = await actualizarPendiente(adminClient, equipoId, {
         storage_limpiado: true,
         rutas_storage: [],
-      })
+      }, bloqueoToken)
       if (marcaError) {
         console.error(
           'No se pudo registrar la limpieza de Storage:',
           marcaError.message,
         )
+        return resumenNoVerificado('no se pudo guardar el progreso')
       }
     }
   }
@@ -170,12 +170,13 @@ async function finalizarLimpieza(
     if (driveFileIds.length === 0) {
       driveLimpiado = true
     } else {
-      for (const lote of dividirEnLotes(driveFileIds, TAMANO_LOTE_ARCHIVOS)) {
+      for (const lote of dividirEnLotes(driveFileIds, TAMANO_LOTE_ARCHIVOS).slice(0, 2)) {
         try {
           const response = await fetch(
             `${supabaseUrl}/functions/v1/fotografias-drive`,
             {
               method: 'DELETE',
+              signal: AbortSignal.timeout(30_000),
               headers: {
                 Authorization: `Bearer ${token}`,
                 apikey: anonKey,
@@ -209,13 +210,13 @@ async function finalizarLimpieza(
         const marcaError = await actualizarPendiente(adminClient, equipoId, {
           drive_file_ids: driveFileIds,
           drive_limpiado: driveLimpiado,
-        })
+        }, bloqueoToken)
         if (marcaError) {
           console.error(
             'No se pudo registrar el avance de Google Drive:',
             marcaError.message,
           )
-          break
+          return resumenNoVerificado('no se pudo guardar el progreso')
         }
       }
     }
@@ -224,12 +225,13 @@ async function finalizarLimpieza(
       const marcaError = await actualizarPendiente(adminClient, equipoId, {
         drive_limpiado: true,
         drive_file_ids: [],
-      })
+      }, bloqueoToken)
       if (marcaError) {
         console.error(
           'No se pudo registrar la limpieza de Google Drive:',
           marcaError.message,
         )
+        return resumenNoVerificado('no se pudo guardar el progreso')
       }
     }
   }
@@ -246,6 +248,7 @@ async function finalizarLimpieza(
       .from('eliminaciones_pendientes')
       .delete()
       .eq('equipo_id', equipoId)
+      .eq('bloqueo_token', bloqueoToken)
     if (borrarError) {
       console.error(
         'No se pudo borrar el registro de limpieza pendiente:',
@@ -255,6 +258,28 @@ async function finalizarLimpieza(
   }
 
   return resumen
+}
+
+async function finalizarLimpieza(
+  adminClient: SupabaseClient, supabaseUrl: string, anonKey: string,
+  token: string, equipoId: string,
+): Promise<ResumenLimpieza> {
+  const bloqueoToken = crypto.randomUUID()
+  const { data: pendiente, error: consultaError } = await adminClient
+    .from('eliminaciones_pendientes').select('equipo_id').eq('equipo_id', equipoId).maybeSingle()
+  if (consultaError) return resumenNoVerificado('no se pudo consultar el registro')
+  if (!pendiente) return { limpiezaCompleta: true, archivosPendientes: { storage: 0, drive: 0 }, advertencia: null }
+  const { data: adquirido, error } = await adminClient.rpc('reclamar_limpieza_equipo', {
+    p_equipo_id: equipoId, p_token: bloqueoToken,
+  })
+  if (error || !adquirido) return resumenNoVerificado('limpieza en curso o falta confirmar la baja')
+  try {
+    return await procesarLimpieza(adminClient, supabaseUrl, anonKey, token, equipoId, bloqueoToken)
+  } finally {
+    await adminClient.from('eliminaciones_pendientes')
+      .update({ bloqueo_token: null, bloqueo_hasta: null })
+      .eq('equipo_id', equipoId).eq('bloqueo_token', bloqueoToken)
+  }
 }
 
 Deno.serve(async (request: Request) => {
@@ -277,19 +302,6 @@ Deno.serve(async (request: Request) => {
     } catch {
       throw new HttpError('La solicitud de eliminación no es válida.', 400)
     }
-    if (
-      typeof body !== 'object' ||
-      body === null ||
-      !('equipoId' in body) ||
-      typeof body.equipoId !== 'string' ||
-      !uuidPattern.test(body.equipoId) ||
-      !('codigoInstitucional' in body) ||
-      typeof body.codigoInstitucional !== 'string' ||
-      !body.codigoInstitucional.trim()
-    ) {
-      throw new HttpError('El equipo o código institucional no es válido.', 400)
-    }
-
     const supabaseUrl = Deno.env.get('SUPABASE_URL')
     const anonKey = Deno.env.get('SUPABASE_ANON_KEY')
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
@@ -300,6 +312,7 @@ Deno.serve(async (request: Request) => {
 
     const authClient = createClient(supabaseUrl, anonKey, {
       auth: { autoRefreshToken: false, persistSession: false },
+      global: { fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(30_000) }) },
     })
     const { data: authData, error: authError } = await authClient.auth.getUser(token)
     if (authError || !authData.user) {
@@ -308,6 +321,7 @@ Deno.serve(async (request: Request) => {
 
     const adminClient = createClient(supabaseUrl, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
+      global: { fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(30_000) }) },
     })
     const { data: perfil, error: perfilError } = await adminClient
       .from('profiles')
@@ -320,6 +334,31 @@ Deno.serve(async (request: Request) => {
     }
     if (perfil?.rol !== 'admin' || perfil.activo !== true) {
       throw new HttpError('Solo un administrador activo puede eliminar equipos.', 403)
+    }
+
+    if (typeof body === 'object' && body !== null && 'accion' in body && body.accion === 'listar-pendientes') {
+      const { data, error } = await adminClient.from('eliminaciones_pendientes')
+        .select('equipo_id, codigo_institucional, rutas_storage, drive_file_ids, creado_at, bloqueo_hasta')
+        .order('creado_at').limit(100)
+      if (error) throw new HttpError('No se pudieron consultar las limpiezas pendientes.', 500)
+      return respuesta({ success: true, pendientes: (data ?? []).map((fila) => ({
+        equipoId: fila.equipo_id, codigoInstitucional: fila.codigo_institucional,
+        storage: fila.rutas_storage.length, drive: fila.drive_file_ids.length,
+        creadoAt: fila.creado_at, bloqueoHasta: fila.bloqueo_hasta,
+      })) })
+    }
+
+    if (
+      typeof body !== 'object' ||
+      body === null ||
+      !('equipoId' in body) ||
+      typeof body.equipoId !== 'string' ||
+      !uuidPattern.test(body.equipoId) ||
+      !('codigoInstitucional' in body) ||
+      typeof body.codigoInstitucional !== 'string' ||
+      !body.codigoInstitucional.trim()
+    ) {
+      throw new HttpError('El equipo o código institucional no es válido.', 400)
     }
 
     const equipoId = body.equipoId
@@ -373,61 +412,8 @@ Deno.serve(async (request: Request) => {
       )
     }
 
-    const { data: equipo, error: equipoError } = await adminClient
-      .from('equipos')
-      .select('id, codigo_institucional, situacion')
-      .eq('id', equipoId)
-      .maybeSingle()
-    if (equipoError) {
-      console.error('No se pudo consultar el equipo a eliminar:', equipoError.message)
-      throw new HttpError('No se pudo verificar el equipo seleccionado.', 500)
-    }
-    if (!equipo) throw new HttpError('El equipo ya no existe.', 404)
-    if (equipo.situacion !== 'baja') {
-      throw new HttpError('Solo se pueden eliminar equipos previamente dados de baja.', 409)
-    }
-    if (equipo.codigo_institucional !== codigoInstitucional) {
-      throw new HttpError('El código institucional no coincide.', 400)
-    }
-
-    const { data: fotografias, error: fotosError } = await adminClient
-      .from('fotografias_equipos')
-      .select('id, ruta_storage, drive_file_id')
-      .eq('equipo_id', equipoId)
-    if (fotosError) {
-      console.error('No se pudieron listar las fotografías del equipo:', fotosError.message)
-      throw new HttpError('No se pudieron consultar las fotografías del equipo.', 500)
-    }
-
-    const archivos = extraerArchivosEquipo(fotografias)
-
-    // La lista de archivos se persiste ANTES de la RPC. Si PostgreSQL falla,
-    // no se ha tocado ningún archivo y el reintento usa esta misma lista.
-    const { error: pendienteError } = await adminClient
-      .from('eliminaciones_pendientes')
-      .upsert(
-        {
-          equipo_id: equipoId,
-          codigo_institucional: codigoInstitucional,
-          rutas_storage: archivos.rutasStorage,
-          drive_file_ids: archivos.driveFileIds,
-          storage_limpiado: archivos.rutasStorage.length === 0,
-          drive_limpiado: archivos.driveFileIds.length === 0,
-          creado_por: authData.user.id,
-          actualizado_at: new Date().toISOString(),
-        },
-        { onConflict: 'equipo_id' },
-      )
-    if (pendienteError) {
-      console.error('No se pudo registrar la limpieza pendiente:', pendienteError.message)
-      throw new HttpError(
-        'No se pudo preparar la eliminación del equipo. No se modificó ninguna fotografía; vuelve a intentarlo.',
-        500,
-      )
-    }
-
-    // Solo después de confirmar la RPC se tocan Storage y Google Drive. Así un
-    // fallo de PostgreSQL nunca deja al equipo sin sus fotografías.
+    // PostgreSQL validates and locks the device atomically. A pre-query here
+    // could incorrectly reject a concurrent request after the first commits.
     const { error: eliminarError } = await adminClient.rpc(
       'eliminar_equipo_dado_de_baja',
       {
@@ -449,19 +435,6 @@ Deno.serve(async (request: Request) => {
           'No se pudo eliminar el equipo y su historial:',
           eliminarError.message,
         )
-        // El equipo y sus fotografías siguen intactos: la fila de limpieza
-        // diferida no debe quedar registrada como trabajo pendiente. Se borra
-        // en modo best-effort; si falla, el siguiente intento la sobrescribe.
-        const { error: limpiarPendienteError } = await adminClient
-          .from('eliminaciones_pendientes')
-          .delete()
-          .eq('equipo_id', equipoId)
-        if (limpiarPendienteError) {
-          console.warn(
-            'No se pudo retirar la limpieza diferida tras el fallo de la RPC:',
-            limpiarPendienteError.message,
-          )
-        }
         throw new HttpError(
           'No se pudo eliminar el equipo y su historial. No se modificó ninguna fotografía: el equipo sigue dado de baja y puedes reintentar la operación.',
           409,
@@ -492,7 +465,7 @@ Deno.serve(async (request: Request) => {
       {
         success: true,
         equipoId,
-        fotografias: (fotografias ?? []).length,
+        fotografias: null,
         reintento: false,
         limpiezaCompleta: resumen.limpiezaCompleta,
         archivosPendientes: resumen.archivosPendientes,

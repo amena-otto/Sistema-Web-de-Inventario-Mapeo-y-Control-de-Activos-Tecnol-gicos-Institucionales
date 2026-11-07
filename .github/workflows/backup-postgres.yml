@@ -28,6 +28,7 @@ jobs:
             | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
           sudo apt-get update
           sudo apt-get install --yes postgresql-client-18
+          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
 
       - name: Install AWS CLI v2
         shell: bash
@@ -97,7 +98,9 @@ jobs:
           verified_dump="${workdir}/verified.dump"
           encrypted="${workdir}/database.dump.gpg"
           checksum="${workdir}/database.dump.gpg.sha256"
-          trap 'rm -f -- "$dump" "$restore_list" "$verified_dump" "$encrypted" "$checksum"; rmdir -- "$workdir"' EXIT
+          remote_encrypted="${workdir}/remote.dump.gpg"
+          remote_checksum="${workdir}/remote.sha256"
+          trap 'rm -f -- "$dump" "$restore_list" "$verified_dump" "$encrypted" "$checksum" "$remote_encrypted" "$remote_checksum"; rmdir -- "$workdir"' EXIT
 
           pg_dump --dbname="$SUPABASE_DB_URL" --format=custom --file="$dump" \
             --lock-wait-timeout=30s
@@ -169,6 +172,12 @@ jobs:
             echo "El archivo de suma SHA-256 no se subió correctamente." >&2
             exit 1
           fi
+          # Verify bytes downloaded from R2, not only the object size.
+          aws --endpoint-url "$endpoint" --region auto s3 cp "s3://${R2_BUCKET_NAME}/${object_key}" "$remote_encrypted" --only-show-errors
+          aws --endpoint-url "$endpoint" --region auto s3 cp "s3://${R2_BUCKET_NAME}/${object_key}.sha256" "$remote_checksum" --only-show-errors
+          cmp --silent "$checksum" "$remote_checksum"
+          hash_remoto="$(sha256sum "$remote_encrypted" | awk '{print $1}')"
+          test "$hash_remoto" = "$hash_cifrado"
           echo "Respaldo cifrado y verificado en R2: ${object_key} (${tamano_local} bytes, sha256=${hash_cifrado})"
 
       - name: Diagnóstico (sin credenciales)

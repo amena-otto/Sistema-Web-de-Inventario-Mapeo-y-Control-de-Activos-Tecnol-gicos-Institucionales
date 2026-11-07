@@ -286,6 +286,14 @@ test('migraciones 015 y 016: idempotencia, triggers y RPC de eliminación', asyn
       assert.equal(final.rows[0].pendientes, 0)
     })
 
+    await db.exec(leerMigracion('017_eliminacion_atomica_y_bloqueo_limpieza.sql'))
+    await db.exec(leerMigracion('017_eliminacion_atomica_y_bloqueo_limpieza.sql'))
+
+    await t.test('017 blocks cleanup before commit', async () => {
+      await assert.rejects(db.query('select public.reclamar_limpieza_equipo($1, $2)',
+        [EQUIPO, ADMIN]), /confirmada/)
+    })
+
     await t.test('la RPC elimina el equipo, su historial operativo y conserva la auditoría', async () => {
       await db.query(
         `insert into public.profiles (id, rol, activo)
@@ -372,6 +380,22 @@ test('migraciones 015 y 016: idempotencia, triggers y RPC de eliminación', asyn
       assert.ok(constancia.rows[0].datos_equipo)
     })
 
+    await t.test('017 stores the exact file manifest in the deletion transaction', async () => {
+      const { rows } = await db.query('select * from public.eliminaciones_pendientes where equipo_id = $1', [EQUIPO])
+      assert.deepEqual(rows[0].rutas_storage, ['equipos/a.jpg'])
+      assert.deepEqual(rows[0].drive_file_ids, ['drive-1'])
+      assert.equal(rows[0].creado_por, ADMIN)
+      assert.equal(rows[0].storage_limpiado, false)
+    })
+
+    await t.test('017 excludes concurrent workers and recovers an expired lease', async () => {
+      const claim = () => db.query('select public.reclamar_limpieza_equipo($1, $2) as ok', [EQUIPO, ADMIN])
+      assert.equal((await claim()).rows[0].ok, true)
+      assert.equal((await claim()).rows[0].ok, false)
+      await db.query("update public.eliminaciones_pendientes set bloqueo_hasta = now() - interval '1 second' where equipo_id = $1", [EQUIPO])
+      assert.equal((await claim()).rows[0].ok, true)
+    })
+
     await t.test('la RPC es idempotente en el reintento', async () => {
       await db.query(
         'select public.eliminar_equipo_dado_de_baja($1, $2, $3)',
@@ -411,6 +435,34 @@ test('migraciones 015 y 016: idempotencia, triggers y RPC de eliminación', asyn
         ),
         /administrador activo/i,
       )
+    })
+    await t.test('017 rolls back the manifest, receipt and photos on SQL failure', async () => {
+      await db.query("insert into public.fotografias_equipos (equipo_id, ruta_storage) values ($1, 'failed.jpg')", [EQUIPO_FALLIDO])
+      await db.exec(`create function private.fallar_borrado() returns trigger language plpgsql as $$
+        begin raise exception 'simulated SQL failure'; end; $$;
+        create trigger fallo before delete on public.equipos for each row execute function private.fallar_borrado();`)
+      await assert.rejects(db.query('select public.eliminar_equipo_dado_de_baja($1, $2, $3)',
+        [EQUIPO_FALLIDO, 'OT-EQP-000003', ADMIN]), /simulated SQL failure/)
+      const { rows } = await db.query(`select
+        (select count(*)::int from public.fotografias_equipos where equipo_id = $1) as photos,
+        (select count(*)::int from public.eliminaciones_pendientes where equipo_id = $1) as pending,
+        (select count(*)::int from public.equipos_eliminados where equipo_id = $1) as receipts`, [EQUIPO_FALLIDO])
+      assert.deepEqual(rows[0], { photos: 1, pending: 0, receipts: 0 })
+      await db.exec('drop trigger fallo on public.equipos; drop function private.fallar_borrado();')
+    })
+
+    await t.test('017 protects files referenced by another active device', async () => {
+      await db.query("insert into public.fotografias_equipos (equipo_id, ruta_storage) values ($1, 'failed.jpg')", [RELACIONADO])
+      await assert.rejects(db.query('select public.eliminar_equipo_dado_de_baja($1, $2, $3)',
+        [EQUIPO_FALLIDO, 'OT-EQP-000003', ADMIN]), /compartidas/)
+    })
+
+    await t.test('017 preserves six triggers, RLS and service-only RPC permissions', async () => {
+      const { rows } = await db.query(`select
+        (select count(*)::int from pg_trigger where tgrelid = 'public.equipos'::regclass and not tgisinternal) as triggers,
+        has_function_privilege('authenticated', 'public.reclamar_limpieza_equipo(uuid,uuid)', 'execute') as client,
+        has_function_privilege('service_role', 'public.reclamar_limpieza_equipo(uuid,uuid)', 'execute') as service`)
+      assert.deepEqual(rows[0], { triggers: 6, client: false, service: true })
     })
   } finally {
     await db.close()

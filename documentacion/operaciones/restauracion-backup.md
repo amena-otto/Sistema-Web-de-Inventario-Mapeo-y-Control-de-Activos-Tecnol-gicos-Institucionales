@@ -105,3 +105,50 @@ contraseña). Causas frecuentes:
 
 Los logs completos de GitHub Actions solo los puede revisar un administrador del
 repositorio; no contienen secretos en claro, pero sí el detalle del error.
+
+
+## Evidencia adicional del 7 de noviembre de 2026
+
+Se genero un archivo custom completo con pg_dump 18.6 usando la conexion
+administrativa temporal de la CLI (rol postgres), sin persistir credenciales.
+Una conexion sin ese rol no tenia permiso sobre auth; ese intento fallido no
+se considero respaldo y fue sustituido por el archivo completo correcto.
+
+Ubicacion privada local, fuera del repositorio:
+`%LOCALAPPDATA%\Codex\inventory-stabilization-20261107`.
+El archivo conservado es `production.dump.gpg`; su checksum esta en
+`production.dump.gpg.sha256`. SHA256:
+`8d7318b1a9688d3baaf92878a8ff951e3fe7b351cbee999e026ff46c39d1fa82`.
+La clave aleatoria esta protegida con Windows DPAPI en `backup-key.dpapi`;
+solo la misma cuenta Windows puede recuperarla. No subir ni compartir esa clave.
+No constituye una copia externa mientras no se complete la configuracion de R2.
+
+Para descifrar con la misma cuenta, desde PowerShell (sin imprimir la clave):
+
+```powershell
+$carpetaRespaldo = Join-Path $env:LOCALAPPDATA 'Codex\inventory-stabilization-20261107'
+$claveSegura = Get-Content -LiteralPath (Join-Path $carpetaRespaldo 'backup-key.dpapi') | ConvertTo-SecureString
+$credencialRespaldo = New-Object System.Net.NetworkCredential('', $claveSegura)
+$credencialRespaldo.Password | & 'C:\Program Files\Git\usr\bin\gpg.exe' --batch --yes --pinentry-mode loopback --passphrase-fd 0 --decrypt --output (Join-Path $carpetaRespaldo 'restore.dump') (Join-Path $carpetaRespaldo 'production.dump.gpg')
+Remove-Variable credencialRespaldo, claveSegura
+```
+
+Antes de descifrar, comparar Get-FileHash SHA256 con el archivo checksum.
+No ejecutar una restauracion sobre produccion con estas instrucciones.
+
+La restauracion comprobada uso PostgreSQL 18.6 local, puerto 55439, exclusivamente
+loopback, con esquemas auth, public, private y storage. Se prepararon roles,
+pgcrypto, uuid-ossp y supabase_realtime. pg_restore uso --no-owner y
+--no-privileges; no certifica la recuperacion de todos los privilegios originales,
+Vault ni servicios gestionados. Las ACL necesitan restauracion/verificacion en
+un staging Supabase compatible antes de aprobar produccion.
+
+Se recuperaron 47 equipos, 3 perfiles, 3 usuarios y 434 registros de auditoria.
+Las huellas de filas completas de equipos, perfiles y auditoria coinciden con
+produccion. No se eliminaron equipos institucionales para probar: el SQL usa
+UUID ficticio y rollback; la prueba concurrente usa otra base descartable.
+
+Los binarios de Storage y Google Drive no estan incluidos en pg_dump, aunque
+sus metadatos aparezcan en el archivo. No se verifico copia externa de esos binarios.
+Los logs del workflow remoto del 7 de noviembre muestran secretos R2/cifrado
+no configurados; no se debe describir ese workflow como operativo hasta repararlos.

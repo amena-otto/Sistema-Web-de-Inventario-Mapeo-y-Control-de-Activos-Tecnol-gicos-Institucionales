@@ -1,6 +1,6 @@
 import { prepararCsvInventario, leerArchivoCsv, analizarImportacionCsv, identificadoresCsv, type AnalisisImportacionCsv, type FilaImportacionCsv } from '../utils/csvInventario'
 import { columnasImportacion } from '../utils/inventario'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { usePermissions } from '../hooks/usePermissions'
 import {
   cargarCatalogos,
@@ -301,6 +301,7 @@ export default function Reportes() {
   const [cargandoCatalogos, setCargandoCatalogos] = useState(true)
   const [generando, setGenerando] = useState(false)
   const [importando, setImportando] = useState(false)
+  const operacionCsv = useRef(false)
   const [resultadoImportacion, setResultadoImportacion] = useState<string[]>([])
   const [analisisImportacion, setAnalisisImportacion] = useState<AnalisisImportacionCsv | null>(null)
   const [error, setError] = useState('')
@@ -459,7 +460,9 @@ export default function Reportes() {
   }
 
   async function seleccionarCsv(archivo: File) {
-    if (!puedeImportarEquipos || importando) return
+    if (!puedeImportarEquipos || operacionCsv.current) return
+    operacionCsv.current = true
+    setImportando(true)
     setError('')
     setAviso('')
     setResultadoImportacion([])
@@ -494,6 +497,9 @@ export default function Reportes() {
       }
     } catch (causa) {
       setError(mostrarError(causa, 'No se pudo procesar el archivo CSV.'))
+    } finally {
+      operacionCsv.current = false
+      setImportando(false)
     }
   }
 
@@ -519,10 +525,11 @@ export default function Reportes() {
   }
 
   async function confirmarImportacion() {
-    if (!analisisImportacion || importando) return
+    if (!puedeImportarEquipos || !analisisImportacion || operacionCsv.current) return
     const filasValidas = analisisImportacion.filas.filter((fila) => !fila.errores.length)
     if (!filasValidas.length) return
 
+    operacionCsv.current = true
     setImportando(true)
     setError('')
     setAviso('')
@@ -564,6 +571,7 @@ export default function Reportes() {
         setFechaGeneracion('')
       }
     } finally {
+      operacionCsv.current = false
       setImportando(false)
     }
   }

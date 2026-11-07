@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { Link, useSearchParams } from 'react-router-dom'
 import EquipoQrDialog from '../components/EquipoQrDialog'
 import ConfirmarEliminacionEquipo from '../components/ConfirmarEliminacionEquipo'
+import LimpiezasPendientes from '../components/LimpiezasPendientes'
 import EstadoEquipoBadge from '../components/EstadoEquipoBadge'
 import EstadoVacio from '../components/EstadoVacio'
 import Paginacion from '../components/Paginacion'
@@ -1191,6 +1192,7 @@ export default function Equipos() {
         </div>
       </div>
 
+      {puedeDarDeBaja && verEquiposDadosDeBaja && <LimpiezasPendientes />}
       {error && (
         <p role="alert" className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">
           {error}

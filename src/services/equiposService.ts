@@ -758,6 +758,26 @@ export async function eliminarEquipoDadoDeBaja(
   }
 }
 
+export type LimpiezaPendiente = {
+  equipoId: string
+  codigoInstitucional: string
+  storage: number
+  drive: number
+  creadoAt: string
+  bloqueoHasta: string | null
+}
+
+export async function listarLimpiezasPendientes(): Promise<LimpiezaPendiente[]> {
+  const { data, error } = await supabase.functions.invoke('admin-eliminar-equipo', {
+    body: { accion: 'listar-pendientes' },
+  })
+  if (error) throw new Error('No se pudieron consultar las limpiezas pendientes. Verifica tu sesión y la disponibilidad del servicio.')
+  if (!data?.success || !Array.isArray(data.pendientes)) {
+    throw new Error('El servicio no confirmó la lista de limpiezas pendientes.')
+  }
+  return data.pendientes as LimpiezaPendiente[]
+}
+
 export async function subirFotografia(
   equipoId: string,
   archivo: File,
