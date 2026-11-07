@@ -1,7 +1,7 @@
 import { FunctionsHttpError } from '@supabase/supabase-js'
 import { supabase } from './supabaseClient'
 
-import { estadosOperativos, validarEquipo, ejecutarImportacion } from '../utils/inventario'
+import { estadosOperativos, validarEquipo, ejecutarImportacion, terminosBusqueda } from '../utils/inventario'
 export { estadosOperativos } from '../utils/inventario'
 
 export type EstadoOperativo = (typeof estadosOperativos)[number]
@@ -225,10 +225,9 @@ export async function listarEquipos({
   )
 
   if (busqueda) {
-    const seguro = busqueda.replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑüÜ\s_-]/g, '').trim()
     // Cada palabra debe aparecer en alguno de los campos consultados. Así
     // "lenovo thinkpad" encuentra el equipo aunque los datos estén separados.
-    for (const termino of seguro.split(/\s+/).filter(Boolean).slice(0, 6)) {
+    for (const termino of terminosBusqueda(busqueda)) {
       const patron = `*${termino}*`
       consulta = consulta.or(
         `codigo_institucional.ilike.${patron},nombre.ilike.${patron},marca.ilike.${patron},modelo.ilike.${patron},numero_serie.ilike.${patron},codigo_patrimonial.ilike.${patron}`,
@@ -238,6 +237,10 @@ export async function listarEquipos({
 
   if (estado === 'baja' || estado === 'archivado') {
     consulta = consulta.eq('situacion', estado)
+  } else if (estado === 'activo') {
+    // "activo" es una situación, no un estado operativo. Sin esta rama la
+    // consulta filtraba por un estado inexistente y devolvía cero filas.
+    consulta = consulta.eq('situacion', 'activo')
   } else if (estado) {
     consulta = consulta.eq('estado_operativo', estado).eq('situacion', 'activo')
   } else if (situacion) {
@@ -283,11 +286,8 @@ export async function listarEquiposParaExportar(filtros: {
       .range(inicio, inicio + porLote - 1)
 
     if (filtros.busqueda) {
-      const seguro = filtros.busqueda
-        .replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑüÜ\s_-]/g, '')
-        .trim()
-      if (seguro) {
-        const patron = `*${seguro}*`
+      for (const termino of terminosBusqueda(filtros.busqueda)) {
+        const patron = `*${termino}*`
         consulta = consulta.or(
           `codigo_institucional.ilike.${patron},nombre.ilike.${patron},marca.ilike.${patron},modelo.ilike.${patron},numero_serie.ilike.${patron},codigo_patrimonial.ilike.${patron}`,
         )
@@ -409,6 +409,47 @@ export async function actualizarEquipo(
     .single()
   if (error) throw error
   return data as Equipo
+}
+
+export type IdentificadorEquipoExistente = {
+  id: string
+  codigo_institucional: string
+  numero_serie: string | null
+  codigo_patrimonial: string | null
+}
+
+// Consulta únicamente los identificadores presentes en el CSV. Sirve para
+// avisar de duplicados reales durante la vista previa, sin descargar todo el
+// inventario ni escribir en la base de datos.
+export async function buscarEquiposPorIdentificadores(
+  series: string[],
+  patrimonios: string[],
+): Promise<IdentificadorEquipoExistente[]> {
+  const encontrados = new Map<string, IdentificadorEquipoExistente>()
+
+  async function consultar(
+    columna: 'numero_serie' | 'codigo_patrimonial',
+    valores: string[],
+  ) {
+    for (let inicio = 0; inicio < valores.length; inicio += 100) {
+      const lote = valores.slice(inicio, inicio + 100)
+      if (!lote.length) continue
+      const { data, error } = await supabase
+        .from('equipos')
+        .select('id, codigo_institucional, numero_serie, codigo_patrimonial')
+        .in(columna, lote)
+      if (error) throw error
+      for (const equipo of (data ?? []) as IdentificadorEquipoExistente[]) {
+        encontrados.set(equipo.id, equipo)
+      }
+    }
+  }
+
+  await Promise.all([
+    consultar('numero_serie', series),
+    consultar('codigo_patrimonial', patrimonios),
+  ])
+  return [...encontrados.values()]
 }
 
 export async function posiblesDuplicados(
@@ -668,14 +709,22 @@ export async function reactivarEquipo(id: string) {
   if (error) throw error
 }
 
+export type ResultadoEliminacionEquipo = {
+  limpiezaCompleta: boolean
+  advertencia: string | null
+}
+
 export async function eliminarEquipoDadoDeBaja(
   id: string,
   codigoInstitucional: string,
-): Promise<void> {
-  const { data, error } = await supabase.functions.invoke<{ success: boolean }>(
-    'admin-eliminar-equipo',
-    { body: { equipoId: id, codigoInstitucional } },
-  )
+): Promise<ResultadoEliminacionEquipo> {
+  const { data, error } = await supabase.functions.invoke<{
+    success: boolean
+    limpiezaCompleta?: boolean
+    advertencia?: string | null
+  }>('admin-eliminar-equipo', {
+    body: { equipoId: id, codigoInstitucional },
+  })
 
   if (error) {
     if (error instanceof FunctionsHttpError) {
@@ -699,6 +748,34 @@ export async function eliminarEquipoDadoDeBaja(
   if (!data?.success) {
     throw new Error('No se recibió confirmación de la eliminación del equipo.')
   }
+
+  return {
+    limpiezaCompleta: data.limpiezaCompleta !== false,
+    advertencia:
+      typeof data.advertencia === 'string' && data.advertencia.trim()
+        ? data.advertencia
+        : null,
+  }
+}
+
+export type LimpiezaPendiente = {
+  equipoId: string
+  codigoInstitucional: string
+  storage: number
+  drive: number
+  creadoAt: string
+  bloqueoHasta: string | null
+}
+
+export async function listarLimpiezasPendientes(): Promise<LimpiezaPendiente[]> {
+  const { data, error } = await supabase.functions.invoke('admin-eliminar-equipo', {
+    body: { accion: 'listar-pendientes' },
+  })
+  if (error) throw new Error('No se pudieron consultar las limpiezas pendientes. Verifica tu sesión y la disponibilidad del servicio.')
+  if (!data?.success || !Array.isArray(data.pendientes)) {
+    throw new Error('El servicio no confirmó la lista de limpiezas pendientes.')
+  }
+  return data.pendientes as LimpiezaPendiente[]
 }
 
 export async function subirFotografia(

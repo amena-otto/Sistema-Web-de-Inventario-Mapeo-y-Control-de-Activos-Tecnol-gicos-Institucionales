@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2'
+import { normalizarListaArchivos } from '../_shared/eliminacion.ts'
 
 
 const googleTokenUrl = 'https://oauth2.googleapis.com/token'
@@ -23,6 +24,7 @@ async function marcarArchivoDrive(
   url.searchParams.set('supportsAllDrives', 'true')
   const response = await fetch(url, {
     method: 'PATCH',
+    signal: AbortSignal.timeout(15_000),
     headers: {
       Authorization: `Bearer ${accessToken}`,
       'Content-Type': 'application/json',
@@ -295,9 +297,15 @@ async function subirArchivoDrive(
 }
 
 async function borrarArchivoDrive(
+  adminClient: SupabaseClient,
   accessToken: string,
   fileId: string,
 ): Promise<void> {
+  const { data: referencias, error } = await adminClient
+    .from('fotografias_equipos').select('id').eq('drive_file_id', fileId).limit(1)
+  if (error || referencias?.length) {
+    throw new Error('El archivo sigue vinculado o no se pudo verificar; se conserva para evitar perder la foto.')
+  }
   const url = new URL(
     `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}`,
   )
@@ -333,7 +341,7 @@ async function descargarArchivoDrive(
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers':
-    'authorization, x-client-info, apikey, content-type',
+    'authorization, x-client-info, apikey, content-type, x-operacion',
   'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
 }
 const rolesLectura = ['admin', 'tecnico', 'consulta']
@@ -467,13 +475,13 @@ async function subirFotografia(request: Request) {
       .order('id')
 
     if (principalError) {
-      await borrarArchivoDrive(accessToken, driveFileId)
+      await borrarArchivoDrive(adminClient, accessToken, driveFileId)
       console.error('No se pudo consultar la fotografía principal:', principalError.message)
       throw new Error('No se pudo consultar la fotografía principal.')
     }
     const principal = principales?.[0]
     if (!principal) {
-      await borrarArchivoDrive(accessToken, driveFileId)
+      await borrarArchivoDrive(adminClient, accessToken, driveFileId)
       return respuestaJson({ error: 'El equipo no tiene una fotografía principal para reemplazar.' }, 404)
     }
     const principalesExtra = (principales ?? []).slice(1).map((item) => item.id)
@@ -484,7 +492,7 @@ async function subirFotografia(request: Request) {
         .in('id', principalesExtra)
         .eq('equipo_id', equipoIdValue)
       if (normalizarError) {
-        await borrarArchivoDrive(accessToken, driveFileId)
+        await borrarArchivoDrive(adminClient, accessToken, driveFileId)
         console.error('No se pudo normalizar las fotografías adicionales:', normalizarError.message)
         throw new Error('No se pudieron preparar las fotografías para el reemplazo.')
       }
@@ -506,7 +514,7 @@ async function subirFotografia(request: Request) {
           console.error('No se pudieron restaurar los tipos de las fotografías:', restaurarError.message)
         }
       }
-      await borrarArchivoDrive(accessToken, driveFileId)
+      await borrarArchivoDrive(adminClient, accessToken, driveFileId)
       console.error('No se pudo reemplazar la fotografía principal:', actualizarError.message)
       throw new Error('No se pudo reemplazar la fotografía principal.')
     }
@@ -542,7 +550,7 @@ async function subirFotografia(request: Request) {
           console.error('No se pudieron restaurar los tipos de las fotografías:', restaurarError.message)
         }
       }
-      await borrarArchivoDrive(accessToken, driveFileId)
+      await borrarArchivoDrive(adminClient, accessToken, driveFileId)
       throw error
     }
 
@@ -556,7 +564,7 @@ async function subirFotografia(request: Request) {
       .eq('equipo_id', equipoIdValue)
       .eq('tipo', 'principal')
     if (consultarPrincipalesError) {
-      await borrarArchivoDrive(accessToken, driveFileId)
+      await borrarArchivoDrive(adminClient, accessToken, driveFileId)
       console.error('No se pudo consultar la fotografía principal anterior:', consultarPrincipalesError.message)
       throw new Error('No se pudo consultar la fotografía principal anterior.')
     }
@@ -567,7 +575,7 @@ async function subirFotografia(request: Request) {
       .eq('equipo_id', equipoIdValue)
       .eq('tipo', 'principal')
     if (secundariasError) {
-      await borrarArchivoDrive(accessToken, driveFileId)
+      await borrarArchivoDrive(adminClient, accessToken, driveFileId)
       console.error('No se pudo actualizar la fotografía principal anterior:', secundariasError.message)
       throw new Error('No se pudo actualizar la fotografía principal anterior.')
     }
@@ -594,7 +602,7 @@ async function subirFotografia(request: Request) {
         }
       }
       console.error('No se pudo registrar la fotografía de Drive:', registroError.message)
-      await borrarArchivoDrive(accessToken, driveFileId)
+      await borrarArchivoDrive(adminClient, accessToken, driveFileId)
       throw new Error('La fotografía se subió, pero no se pudo vincular al equipo.')
     }
 
@@ -613,7 +621,7 @@ async function subirFotografia(request: Request) {
 
   if (registroError) {
     console.error('No se pudo registrar la fotografía de Drive:', registroError.message)
-    await borrarArchivoDrive(accessToken, driveFileId)
+    await borrarArchivoDrive(adminClient, accessToken, driveFileId)
     throw new Error('La fotografía se subió, pero no se pudo vincular al equipo.')
   }
 
@@ -700,6 +708,70 @@ async function establecerFotografiaPrincipal(request: Request) {
   }
 
   return respuestaJson({ success: true })
+}
+
+async function limpiarArchivosEquipo(request: Request) {
+  const { adminClient } = await validarPerfil(request, ['admin'])
+  let body: unknown
+  try {
+    body = await request.json()
+  } catch {
+    return respuestaJson({ error: 'La solicitud de limpieza no es válida.' }, 400)
+  }
+  if (
+    typeof body !== 'object' ||
+    body === null ||
+    !('equipoId' in body) ||
+    typeof body.equipoId !== 'string' ||
+    !uuidPattern.test(body.equipoId) ||
+    !('driveFileIds' in body) ||
+    !Array.isArray(body.driveFileIds) ||
+    body.driveFileIds.length > 100 ||
+    body.driveFileIds.some(
+      (id) => typeof id !== 'string' || id.length < 10 || id.length > 200,
+    )
+  ) {
+    return respuestaJson({ error: 'Los identificadores de limpieza no son válidos.' }, 400)
+  }
+  if (body.driveFileIds.length === 0) {
+    return respuestaJson({ success: true, eliminadas: 0 })
+  }
+
+  // Require a committed deletion and its server-side file manifest.
+  const [{ data: constancia, error: constanciaError }, { data: equipo, error: equipoError },
+    { data: pendiente, error: pendienteError }] = await Promise.all([
+      adminClient.from('equipos_eliminados').select('equipo_id').eq('equipo_id', body.equipoId).maybeSingle(),
+      adminClient.from('equipos').select('id').eq('id', body.equipoId).maybeSingle(),
+      adminClient.from('eliminaciones_pendientes').select('drive_file_ids').eq('equipo_id', body.equipoId).maybeSingle(),
+    ])
+  if (constanciaError || equipoError || pendienteError) {
+    throw new Error('No se pudo verificar la baja confirmada.')
+  }
+  if (!constancia || equipo || !pendiente) {
+    return respuestaJson({ error: 'La baja no fue confirmada.' }, 409)
+  }
+  const permitidos = new Set(normalizarListaArchivos(pendiente.drive_file_ids))
+  if (body.driveFileIds.some((id: string) => !permitidos.has(id))) {
+    return respuestaJson(
+      { error: 'Uno de los archivos no pertenece al equipo indicado.' },
+      400,
+    )
+  }
+
+  const { data: referencias, error: referenciasError } = await adminClient
+    .from('fotografias_equipos').select('id').in('drive_file_id', body.driveFileIds).limit(1)
+  if (referenciasError || referencias?.length) {
+    return respuestaJson({ error: 'Un archivo sigue referenciado o no se pudo verificar.' }, 409)
+  }
+  const accessToken = await getGoogleAccessToken(adminClient)
+  const limite = Date.now() + 20_000
+  for (const fileId of body.driveFileIds) {
+    if (Date.now() >= limite) throw new Error('El lote requiere un reintento para completar la limpieza.')
+    await marcarArchivoDrive(accessToken, fileId, true)
+  }
+  // No se borran los registros aquí: la función de base de datos los elimina
+  // dentro de su transacción y conserva el conteo real de fotografías.
+  return respuestaJson({ success: true, eliminadas: body.driveFileIds.length })
 }
 
 async function eliminarFotografia(request: Request) {
@@ -899,7 +971,12 @@ Deno.serve(async (request: Request) => {
 
   try {
     if (request.method === 'PATCH') return await establecerFotografiaPrincipal(request)
-    if (request.method === 'DELETE') return await eliminarFotografia(request)
+    if (request.method === 'DELETE') {
+      if (request.headers.get('x-operacion') === 'limpiar-equipo') {
+        return await limpiarArchivosEquipo(request)
+      }
+      return await eliminarFotografia(request)
+    }
     if (request.method === 'POST') return await subirFotografia(request)
     if (request.method === 'GET') return await obtenerFotografia(request)
     return respuestaJson({ error: 'Método no permitido.' }, 405)

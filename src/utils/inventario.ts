@@ -21,6 +21,17 @@ export function normalizarTexto(valor: string) {
   return valor.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().replace(/\s+/g, ' ').toLowerCase()
 }
 
+// Divide la búsqueda en términos independientes y elimina caracteres que
+// romperían la sintaxis de filtros de PostgREST. La lista y la exportación
+// comparten esta misma regla para no mostrar resultados distintos.
+export function terminosBusqueda(valor: string, maximo = 6) {
+  const seguro = valor
+    .replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑüÜ\s_-]/g, '')
+    .trim()
+  if (!seguro) return []
+  return seguro.split(/\s+/).filter(Boolean).slice(0, maximo)
+}
+
 export function validarEquipo(datos: Obligatorios, catalogos?: Catalogos) {
   const errores: Partial<Record<keyof Obligatorios, string>> = {}
   if (!datos.nombre.trim()) errores.nombre = 'Ingresa el nombre del equipo.'

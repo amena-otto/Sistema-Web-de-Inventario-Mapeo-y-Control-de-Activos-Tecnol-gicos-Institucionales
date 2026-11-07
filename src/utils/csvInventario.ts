@@ -1,4 +1,4 @@
-import { columnasImportacion } from './inventario.ts'
+import { columnasImportacion, prepararFilaImportacion } from './inventario.ts'
 
 export function normalizarCsv(valor: string) {
   return valor
@@ -161,3 +161,192 @@ export function fechaCsvAISO(valor: string = '') {
   return iso
 }
 
+export type CatalogosImportacion = {
+  categorias: { id: string; nombre: string }[]
+  ambientes: { id: string; codigo: string }[]
+}
+
+export type EquipoExistenteImportacion = {
+  codigo_institucional: string
+  numero_serie: string | null
+  codigo_patrimonial: string | null
+}
+
+export type FilaImportacionCsv = {
+  numeroLinea: number
+  valores: Record<string, string>
+  preparada: {
+    categoria_id: string
+    ambiente_id: string
+    estado_operativo: string
+  } | null
+  fechaAdquisicion: string | null
+  fechaGarantia: string | null
+  errores: string[]
+}
+
+export type AnalisisImportacionCsv = {
+  cabeceras: string[]
+  filas: FilaImportacionCsv[]
+  validas: number
+  invalidas: number
+}
+
+const camposTecnicos = [
+  ['procesador', 'Procesador'],
+  ['memoria_ram', 'Memoria RAM'],
+  ['almacenamiento', 'Almacenamiento'],
+  ['sistema_operativo', 'Sistema operativo'],
+] as const
+
+// Valida el archivo completo sin escribir nada. Devuelve cada fila con sus
+// errores para que la vista previa permita decidir antes de importar.
+export function analizarImportacionCsv(
+  entrada: {
+    cabeceras: string[]
+    filas: (string[] & { numeroLinea: number })[]
+  },
+  catalogos: CatalogosImportacion,
+  existentes: EquipoExistenteImportacion[] = [],
+): AnalisisImportacionCsv {
+  const seriesExistentes = new Map<string, string>()
+  const patrimoniosExistentes = new Map<string, string>()
+  for (const equipo of existentes) {
+    if (equipo.numero_serie?.trim()) {
+      seriesExistentes.set(equipo.numero_serie.trim(), equipo.codigo_institucional)
+    }
+    if (equipo.codigo_patrimonial?.trim()) {
+      patrimoniosExistentes.set(
+        equipo.codigo_patrimonial.trim(),
+        equipo.codigo_institucional,
+      )
+    }
+  }
+
+  const seriesCsv = new Map<string, number>()
+  const patrimoniosCsv = new Map<string, number>()
+
+  const filas = entrada.filas.map<FilaImportacionCsv>((fila) => {
+    const errores: string[] = []
+    let valores: Record<string, string> = {}
+    let preparada: FilaImportacionCsv['preparada'] = null
+    let fechaAdquisicion: string | null = null
+    let fechaGarantia: string | null = null
+
+    try {
+      valores = valoresFilaCsv(fila, entrada.cabeceras)
+    } catch (causa) {
+      errores.push(causa instanceof Error ? causa.message : 'La fila no tiene un formato válido.')
+      return {
+        numeroLinea: fila.numeroLinea,
+        valores,
+        preparada,
+        fechaAdquisicion,
+        fechaGarantia,
+        errores,
+      }
+    }
+
+    try {
+      preparada = prepararFilaImportacion(valores, catalogos)
+    } catch (causa) {
+      errores.push(causa instanceof Error ? causa.message : 'La fila no es válida.')
+    }
+
+    try {
+      fechaAdquisicion = fechaCsvAISO(valores.fecha_adquisicion)
+    } catch {
+      errores.push(`La fecha de adquisición no es válida: ${valores.fecha_adquisicion}.`)
+    }
+    try {
+      fechaGarantia = fechaCsvAISO(valores.fecha_garantia)
+    } catch {
+      errores.push(`La fecha de garantía no es válida: ${valores.fecha_garantia}.`)
+    }
+    if (
+      fechaAdquisicion &&
+      fechaGarantia &&
+      fechaGarantia < fechaAdquisicion
+    ) {
+      errores.push('La fecha de garantía no puede ser anterior a la fecha de adquisición.')
+    }
+
+    const tecnicas = camposTecnicos
+      .filter(([campo]) => (valores[campo] ?? '').trim())
+      .map(([, etiqueta]) => etiqueta)
+    if (tecnicas.length) {
+      errores.push(
+        `Las características técnicas (${tecnicas.join(', ')}) deben agregarse desde la ficha del equipo después de importar.`,
+      )
+    }
+
+    const serie = (valores.numero_serie ?? '').trim()
+    const patrimonio = (valores.codigo_patrimonial ?? '').trim()
+    if (serie) {
+      const filaAnterior = seriesCsv.get(serie)
+      if (filaAnterior) {
+        errores.push(`Número de serie repetido en el CSV (también en la fila ${filaAnterior}).`)
+      } else {
+        seriesCsv.set(serie, fila.numeroLinea)
+      }
+      const codigo = seriesExistentes.get(serie)
+      if (codigo) {
+        errores.push(`Ya existe el equipo ${codigo} con el mismo número de serie.`)
+      }
+    }
+    if (patrimonio) {
+      const filaAnterior = patrimoniosCsv.get(patrimonio)
+      if (filaAnterior) {
+        errores.push(`Código patrimonial repetido en el CSV (también en la fila ${filaAnterior}).`)
+      } else {
+        patrimoniosCsv.set(patrimonio, fila.numeroLinea)
+      }
+      const codigo = patrimoniosExistentes.get(patrimonio)
+      if (codigo) {
+        errores.push(`Ya existe el equipo ${codigo} con el mismo código patrimonial.`)
+      }
+    }
+
+    return {
+      numeroLinea: fila.numeroLinea,
+      valores,
+      preparada,
+      fechaAdquisicion,
+      fechaGarantia,
+      errores,
+    }
+  })
+
+  const validas = filas.filter((fila) => fila.errores.length === 0).length
+  return {
+    cabeceras: entrada.cabeceras,
+    filas,
+    validas,
+    invalidas: filas.length - validas,
+  }
+}
+
+// Recopila los identificadores del CSV para consultar solo esos valores en la
+// base de datos antes de mostrar la vista previa.
+export function identificadoresCsv(
+  cabeceras: string[],
+  filas: (string[] & { numeroLinea: number })[],
+) {
+  const series = new Set<string>()
+  const patrimonios = new Set<string>()
+  for (const fila of filas) {
+    try {
+      const valores = valoresFilaCsv(fila, cabeceras)
+      if (valores.numero_serie?.trim()) series.add(valores.numero_serie.trim())
+      if (valores.codigo_patrimonial?.trim()) {
+        patrimonios.add(valores.codigo_patrimonial.trim())
+      }
+    } catch {
+      // Las filas con formato inválido se informan en la vista previa.
+    }
+  }
+  return {
+    series: [...series],
+    patrimonios: [...patrimonios],
+  }
+}

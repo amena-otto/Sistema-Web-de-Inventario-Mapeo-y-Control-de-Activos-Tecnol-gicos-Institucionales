@@ -1,86 +1,23 @@
-name: Encrypted PostgreSQL backup
+name: Validate Windows local backup scripts
 
+# Solo datos ficticios. No programa ni conserva respaldos institucionales.
 on:
-  schedule:
-    - cron: '0 8 * * *'
+  pull_request:
+    paths:
+      - 'scripts/*local*.ps1'
+      - 'scripts/test-backup-local.ps1'
+      - '.github/workflows/backup-postgres.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
 
-concurrency:
-  group: postgres-backup
-  cancel-in-progress: false
-
 jobs:
-  backup:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+  validate-local-procedure:
+    runs-on: windows-latest
+    timeout-minutes: 15
     steps:
-      - name: Install PostgreSQL and encryption tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes ca-certificates curl gnupg unzip
-          sudo install -d /usr/share/postgresql-common/pgdg
-          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
-            | sudo gpg --dearmor --yes -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg
-          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg] https://apt.postgresql.org/pub/repos/apt $(. /etc/os-release && echo "$VERSION_CODENAME")-pgdg main" \
-            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
-          sudo apt-get update
-          sudo apt-get install --yes postgresql-client-18
-
-      - name: Install AWS CLI v2
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl -fsSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o "${RUNNER_TEMP}/awscliv2.zip"
-          unzip -q "${RUNNER_TEMP}/awscliv2.zip" -d "${RUNNER_TEMP}/awscli"
-          "${RUNNER_TEMP}/awscli/aws/install" --install-dir "${RUNNER_TEMP}/aws-cli" --bin-dir "${RUNNER_TEMP}/aws-bin"
-          echo "${RUNNER_TEMP}/aws-bin" >> "$GITHUB_PATH"
-          "${RUNNER_TEMP}/aws-bin/aws" --version
-
-      - name: Create, verify, encrypt, and upload backup
-        shell: bash
-        env:
-          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          BACKUP_ENCRYPTION_PASSPHRASE: ${{ secrets.BACKUP_ENCRYPTION_PASSPHRASE }}
-          AWS_DEFAULT_REGION: auto
-        run: |
-          set -euo pipefail
-
-          : "${SUPABASE_DB_URL:?Add SUPABASE_DB_URL to GitHub Actions secrets}"
-          : "${R2_ACCOUNT_ID:?Add R2_ACCOUNT_ID to GitHub Actions secrets}"
-          : "${R2_BUCKET_NAME:?Add R2_BUCKET_NAME to GitHub Actions secrets}"
-          : "${AWS_ACCESS_KEY_ID:?Add R2_ACCESS_KEY_ID to GitHub Actions secrets}"
-          : "${AWS_SECRET_ACCESS_KEY:?Add R2_SECRET_ACCESS_KEY to GitHub Actions secrets}"
-          : "${BACKUP_ENCRYPTION_PASSPHRASE:?Add BACKUP_ENCRYPTION_PASSPHRASE to GitHub Actions secrets}"
-
-          workdir="$(mktemp -d "${RUNNER_TEMP}/postgres-backup.XXXXXX")"
-          dump="${workdir}/database.dump"
-          restore_list="${workdir}/restore-list.txt"
-          verified_dump="${workdir}/verified.dump"
-          encrypted="${workdir}/database.dump.gpg"
-          checksum="${workdir}/database.dump.gpg.sha256"
-          trap 'rm -f -- "$dump" "$restore_list" "$verified_dump" "$encrypted" "$checksum"; rmdir -- "$workdir"' EXIT
-
-          pg_dump --dbname="$SUPABASE_DB_URL" --format=custom --file="$dump"
-          pg_restore --list "$dump" > "$restore_list"
-          printf '%s' "$BACKUP_ENCRYPTION_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback \
-            --passphrase-fd 0 \
-            --symmetric --cipher-algo AES256 \
-            --output "$encrypted" "$dump"
-          printf '%s' "$BACKUP_ENCRYPTION_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback \
-            --passphrase-fd 0 \
-            --decrypt --output "$verified_dump" "$encrypted"
-          pg_restore --list "$verified_dump" > /dev/null
-          sha256sum "$encrypted" | awk '{print $1}' > "$checksum"
-
-          object_key="postgres/$(date -u +%Y/%m/%d)/inventory-$(date -u +%Y%m%dT%H%M%SZ).dump.gpg"
-          endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          aws --endpoint-url "$endpoint" s3 cp "$encrypted" "s3://${R2_BUCKET_NAME}/${object_key}" --only-show-errors
-          aws --endpoint-url "$endpoint" s3 cp "$checksum" "s3://${R2_BUCKET_NAME}/${object_key}.sha256" --only-show-errors
-          aws --endpoint-url "$endpoint" s3api head-object --bucket "$R2_BUCKET_NAME" --key "$object_key" > /dev/null
+      - uses: actions/checkout@v4
+      - name: Test encrypted backup and disposable restore with fictional data
+        shell: powershell
+        run: ./scripts/test-backup-local.ps1

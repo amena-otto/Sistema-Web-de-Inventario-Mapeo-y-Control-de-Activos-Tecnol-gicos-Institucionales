@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { Link, useSearchParams } from 'react-router-dom'
 import EquipoQrDialog from '../components/EquipoQrDialog'
 import ConfirmarEliminacionEquipo from '../components/ConfirmarEliminacionEquipo'
+import LimpiezasPendientes from '../components/LimpiezasPendientes'
 import EstadoEquipoBadge from '../components/EstadoEquipoBadge'
 import EstadoVacio from '../components/EstadoVacio'
 import Paginacion from '../components/Paginacion'
@@ -49,6 +50,7 @@ import {
   type FotografiaConUrl,
   type RelacionEquipo,
   type Responsable,
+  type ResultadoEliminacionEquipo,
   type UbicacionEquipo,
 } from '../services/equiposService'
 
@@ -163,6 +165,7 @@ export default function Equipos() {
   const [errorListado, setErrorListado] = useState('')
   const [error, setError] = useState('')
   const [aviso, setAviso] = useState('')
+  const [advertenciaEliminacion, setAdvertenciaEliminacion] = useState('')
   const [modalAbierto, setModalAbierto] = useState(false)
   const [categoriaModal, setCategoriaModal] = useState(false)
   const [categoriaNueva, setCategoriaNueva] = useState('')
@@ -1140,13 +1143,18 @@ export default function Equipos() {
   }
 
   function solicitarEliminacionDefinitiva(equipo: Equipo) {
+    setAdvertenciaEliminacion('')
     setEquipoAEliminar(equipo)
   }
 
-  function finalizarEliminacionDefinitiva(equipo: Equipo) {
+  function finalizarEliminacionDefinitiva(
+    equipo: Equipo,
+    resultado: ResultadoEliminacionEquipo,
+  ) {
     setAviso(
       `El equipo ${equipo.codigo_institucional} se eliminó definitivamente. La constancia de la baja quedó registrada en la auditoría.`,
     )
+    setAdvertenciaEliminacion(resultado.advertencia ?? '')
     if (equipoDetalle?.id === equipo.id) cerrarDetalle()
     setEquipoAEliminar(null)
     setPagina(1)
@@ -1184,6 +1192,7 @@ export default function Equipos() {
         </div>
       </div>
 
+      {puedeDarDeBaja && verEquiposDadosDeBaja && <LimpiezasPendientes />}
       {error && (
         <p role="alert" className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">
           {error}
@@ -1192,6 +1201,11 @@ export default function Equipos() {
       {aviso && (
         <p role="status" className="mt-4 rounded-lg bg-green-50 p-3 text-sm text-green-700">
           {aviso}
+        </p>
+      )}
+      {advertenciaEliminacion && (
+        <p role="alert" className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          {advertenciaEliminacion}
         </p>
       )}
       <div role="group" aria-label="Situación de los equipos" className="flex flex-wrap gap-2">

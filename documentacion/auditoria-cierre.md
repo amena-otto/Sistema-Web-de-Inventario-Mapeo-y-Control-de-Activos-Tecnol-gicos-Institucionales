@@ -30,8 +30,8 @@ Los códigos RB/CA no existían en el repositorio; se reconstruyeron a partir de
 | RB-05 | Se conservan perfiles y referencias históricas de usuarios dados de baja | ALTO | Sin defecto |
 | RB-06 | RLS y permisos impiden operaciones no autorizadas, incluso con llamadas directas a la API | CRÍTICO | Definido; ejecución pendiente en staging |
 | RB-07 | La auditoría es inmutable (sin UPDATE/DELETE) | ALTO | Implementado; staging pendiente |
-| RB-08 | Ningún secreto (`service_role`, SMTP, Drive, R2) vive en el repositorio ni en el frontend | CRÍTICO | Verificado |
-| RB-09 | Existe respaldo externo cifrado y procedimiento de restauración documentado | ALTO | Documentado; ejecución pendiente |
+| RB-08 | Ningún secreto (`service_role`, SMTP, Drive) vive en el repositorio ni en el frontend | CRÍTICO | Verificado |
+| RB-09 | Procedimiento de respaldo local cifrado y restauracion | ALTO | Probado con datos ficticios; programacion institucional pendiente |
 | RB-10 | CI valida lint, build y tipos de las Edge Functions | MEDIO | Implementado |
 | RB-11 | El esquema es reproducible desde el repositorio (baseline) | ALTO | Pendiente: requiere dump del proyecto |
 | RB-12 | Los cambios son mínimos, reversibles y sin cambiar arquitectura ni proveedor | ALTO | Cumplido |
@@ -55,7 +55,7 @@ Los códigos RB/CA no existían en el repositorio; se reconstruyeron a partir de
 | CA-13 | Perfiles históricos conservados y error `23503` comunicado | Inspección y staging | `admin-eliminar-usuario` | Inspección; staging pendiente |
 | CA-14 | La auditoría rechaza UPDATE y DELETE | RLS en staging | Trigger `proteger_auditoria` | Inspección; staging pendiente |
 | CA-15 | Lint, build y `deno check` en verde | Ejecutada | Salidas de comandos de la sección E | Ejecutado |
-| CA-16 | Respaldo cifrado y restauración documentados | Documental | Workflow de respaldo y fase 11 | Documentado; ejecución pendiente |
+| CA-16 | Respaldo local cifrado y restauracion | Integracion local | Scripts Windows y guia operativa | Prueba ficticia aprobada; no acredita calendario ni copia completa de produccion |
 
 **Leyenda:** cumple con evidencia · definido, falta evidencia real · pendiente de staging o manual.
 
@@ -120,13 +120,15 @@ Reglas aplicadas: el técnico solo se registra a sí mismo y un administrador pu
 - **Secretos:** `.env` está ignorado; los `.env.*` versionados solo contienen `VITE_APP_URL`; `.env.example` usa valores vacíos. No se encontraron claves sensibles en el repositorio. `service_role` solo se usa en Edge Functions.
 - **CORS:** se mantiene `*` con autenticación Bearer y sin cookies. Se acepta como riesgo controlado porque restringirlo puede romper el desarrollo local. Mejora futura: lista explícita de orígenes por entorno.
 
-## G. Respaldo y recuperación
+## G. Respaldo y recuperacion (actualizado: procedimiento local)
 
-- El workflow `.github/workflows/backup-postgres.yml` ejecuta un `pg_dump` diario a las 08:00 UTC, verifica el dump antes y después del cifrado AES-256 y lo carga a Cloudflare R2.
-- Secretos requeridos: `SUPABASE_DB_URL`, `R2_ACCOUNT_ID`, `R2_BUCKET_NAME`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` y `BACKUP_ENCRYPTION_PASSPHRASE`.
-- La retención de 30 días se aplica con el ciclo de vida del bucket, no desde el workflow.
-- El procedimiento de restauración está documentado en `documentacion/fase-11-pruebas-seguridad-respaldos.md`.
-- **Pendiente:** ejecutar una restauración real en staging y registrar fecha, duración, resultado y acciones correctivas. El dump lógico no cubre Google Drive ni el PITR del proveedor.
+- Se retira el respaldo a almacenamiento de pago y sus secretos del workflow.
+- Los scripts Windows gratuitos crean una copia local AES256 y verifican su
+  restauracion en una base descartable. GitHub solo prueba datos ficticios.
+- Guia vigente: documentacion/operaciones/restauracion-backup.md.
+- No hay calendario institucional instalado por este cambio. No afirmar respaldo
+  automatico ni proteccion completa sin ejecucion programada y restauracion comprobadas.
+- Binarios Storage/Drive y permisos/servicios gestionados requieren verificaciones independientes.
 
 ## H. Despliegue
 
