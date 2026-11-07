@@ -24,3 +24,11 @@ dist-ssr
 *.sw?
 .env
 credentials.json
+# Copias y credenciales locales nunca se versionan ni se suben como artifacts.
+*.dump
+*.dump.*
+*.backup
+*.gpg
+*.dpapi
+backup-config*.xml
+*.restauracion.json

@@ -35,6 +35,7 @@ para este cambio son 015, 016 y 017, que se aplicaran explicitamente en ese orde
 - La vista Equipos dados de baja permite consultar y reanudar las primeras 100
   limpiezas pendientes. Tras completarlas se consultan las siguientes. Ambas acciones
   vuelven a validar administrador activo en el servidor.
+- El respaldo SQL se realiza localmente con herramientas gratuitas, sin almacenamiento de pago.
 - El frontend conserva filtros, ambas paginaciones y QR con codigo y serie.
   La preparacion/importacion CSV ahora comparte un bloqueo para evitar solicitudes superpuestas.
 - El contrato POST de eliminacion conserva equipoId, codigoInstitucional, success,
@@ -66,12 +67,11 @@ por un administrador sigue purgando el historial operativo y conserva constancia
 
 ## Bloqueos antes de autorizar produccion
 
-1. Configurar los secretos de R2 y BACKUP_ENCRYPTION_PASSPHRASE en Actions.
-   El respaldo programado del 7 de noviembre fallo por secretos ausentes;
-   SUPABASE_DB_URL si estaba definido. No se puede acreditar R2 con esa ejecucion.
-2. Ejecutar el workflow actualizado en la rama y verificar su descarga y checksum remoto.
-   Las herramientas del conector GitHub permiten consultar/reintentar ejecuciones,
-   pero no iniciar workflow_dispatch de una rama. Puede iniciarse desde Actions.
+1. Crear una copia local cifrada reciente con scripts/backup-postgres-local.ps1.
+   No requiere R2, tarjeta ni secretos en GitHub. Seguir restauracion-backup.md.
+2. Comprobar su restauracion real con scripts/verificar-restaurar-local.ps1,
+   conservar evidencia por SHA256 y las copias independientes de Storage/Drive.
+   Una tarea de Windows no se considera operativa hasta verificar ejecucion y restauracion.
 3. Probar contra staging Supabase completo (Auth, RLS, Storage y Drive de prueba).
    No se encontro una rama staging del proyecto. El otro proyecto de la cuenta
    pertenece a otra aplicacion y no se usa para esta prueba.

@@ -1,215 +1,23 @@
-name: Encrypted PostgreSQL backup
+name: Validate Windows local backup scripts
 
+# Solo datos ficticios. No programa ni conserva respaldos institucionales.
 on:
-  schedule:
-    - cron: '0 8 * * *'
+  pull_request:
+    paths:
+      - 'scripts/*local*.ps1'
+      - 'scripts/test-backup-local.ps1'
+      - '.github/workflows/backup-postgres.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
 
-concurrency:
-  group: postgres-backup
-  cancel-in-progress: false
-
 jobs:
-  backup:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+  validate-local-procedure:
+    runs-on: windows-latest
+    timeout-minutes: 15
     steps:
-      - name: Install PostgreSQL and encryption tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes ca-certificates curl gnupg unzip
-          sudo install -d /usr/share/postgresql-common/pgdg
-          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
-            | sudo gpg --dearmor --yes -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg
-          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg] https://apt.postgresql.org/pub/repos/apt $(. /etc/os-release && echo "$VERSION_CODENAME")-pgdg main" \
-            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
-          sudo apt-get update
-          sudo apt-get install --yes postgresql-client-18
-          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
-
-      - name: Install AWS CLI v2
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl -fsSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o "${RUNNER_TEMP}/awscliv2.zip"
-          unzip -q "${RUNNER_TEMP}/awscliv2.zip" -d "${RUNNER_TEMP}/awscli"
-          "${RUNNER_TEMP}/awscli/aws/install" --install-dir "${RUNNER_TEMP}/aws-cli" --bin-dir "${RUNNER_TEMP}/aws-bin"
-          echo "${RUNNER_TEMP}/aws-bin" >> "$GITHUB_PATH"
-          "${RUNNER_TEMP}/aws-bin/aws" --version
-
-      - name: Create, verify, encrypt, and upload backup
-        shell: bash
-        env:
-          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          BACKUP_ENCRYPTION_PASSPHRASE: ${{ secrets.BACKUP_ENCRYPTION_PASSPHRASE }}
-          AWS_DEFAULT_REGION: auto
-          AWS_EC2_METADATA_DISABLED: 'true'
-          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
-          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
-          PGSSLMODE: require
-          PGCONNECT_TIMEOUT: '30'
-        run: |
-          set -euo pipefail
-
-          : "${SUPABASE_DB_URL:?Add SUPABASE_DB_URL to GitHub Actions secrets}"
-          : "${R2_ACCOUNT_ID:?Add R2_ACCOUNT_ID to GitHub Actions secrets}"
-          : "${R2_BUCKET_NAME:?Add R2_BUCKET_NAME to GitHub Actions secrets}"
-          : "${AWS_ACCESS_KEY_ID:?Add R2_ACCESS_KEY_ID to GitHub Actions secrets}"
-          : "${AWS_SECRET_ACCESS_KEY:?Add R2_SECRET_ACCESS_KEY to GitHub Actions secrets}"
-          : "${BACKUP_ENCRYPTION_PASSPHRASE:?Add BACKUP_ENCRYPTION_PASSPHRASE to GitHub Actions secrets}"
-
-          echo "Versiones: $(pg_dump --version), $(gpg --version | head -n 1), $(aws --version 2>&1)"
-          case "$SUPABASE_DB_URL" in
-            postgres://*|postgresql://*) ;;
-            *)
-              echo "SUPABASE_DB_URL debe comenzar con postgres:// o postgresql://" >&2
-              exit 1
-              ;;
-          esac
-
-          # El pooler en modo transacción (puerto 6543) no admite pg_dump.
-          # Se debe usar la conexión directa o el pooler en modo sesión (5432).
-          host_port="$(python3 - "$SUPABASE_DB_URL" <<'PY'
-          import sys
-          from urllib.parse import urlsplit
-          url = urlsplit(sys.argv[1])
-          print(url.hostname or '', url.port or '')
-          PY
-          )"
-          db_host="$(echo "$host_port" | awk '{print $1}')"
-          db_port="$(echo "$host_port" | awk '{print $2}')"
-          echo "Destino PostgreSQL: ${db_host:-desconocido}:${db_port:-predeterminado}"
-          if [ "$db_port" = "6543" ]; then
-            echo "SUPABASE_DB_URL apunta al pooler de transacciones (6543), incompatible con pg_dump." >&2
-            echo "Usa la conexión directa (db.<proyecto>.supabase.co:5432) o el pooler en modo sesión." >&2
-            exit 1
-          fi
-
-          workdir="$(mktemp -d "${RUNNER_TEMP}/postgres-backup.XXXXXX")"
-          dump="${workdir}/database.dump"
-          restore_list="${workdir}/restore-list.txt"
-          verified_dump="${workdir}/verified.dump"
-          encrypted="${workdir}/database.dump.gpg"
-          checksum="${workdir}/database.dump.gpg.sha256"
-          remote_encrypted="${workdir}/remote.dump.gpg"
-          remote_checksum="${workdir}/remote.sha256"
-          trap 'rm -f -- "$dump" "$restore_list" "$verified_dump" "$encrypted" "$checksum" "$remote_encrypted" "$remote_checksum"; rmdir -- "$workdir"' EXIT
-
-          pg_dump --dbname="$SUPABASE_DB_URL" --format=custom --file="$dump" \
-            --lock-wait-timeout=30s
-          if [ ! -s "$dump" ]; then
-            echo "pg_dump generó un archivo vacío." >&2
-            exit 1
-          fi
-          pg_restore --list "$dump" > "$restore_list"
-
-          # Verifica la presencia exacta de cada tabla crítica. El patrón exige
-          # un espacio o fin de línea después del nombre para que "equipos" no
-          # coincida con "equipos_eliminados". TABLE DATA aparece incluso si la
-          # tabla está vacía, así que una tabla legítima vacía no invalida el
-          # respaldo.
-          tablas_criticas=(
-            profiles equipos equipos_eliminados auditoria
-            ambientes pabellones pisos categorias_equipos
-            componentes relaciones_equipos fotografias_equipos
-            mantenimientos mantenimiento_cambios_estado movimientos
-          )
-          verificar_tablas() {
-            local lista="$1"
-            local tabla
-            for tabla in "${tablas_criticas[@]}"; do
-              if ! grep -Eq "TABLE DATA public ${tabla}([[:space:]]|$)" "$lista"; then
-                echo "El respaldo no contiene la tabla esperada: public.${tabla}" >&2
-                return 1
-              fi
-            done
-          }
-          verificar_tablas "$restore_list"
-          printf '%s' "$BACKUP_ENCRYPTION_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback \
-            --passphrase-fd 0 \
-            --symmetric --cipher-algo AES256 \
-            --output "$encrypted" "$dump"
-          printf '%s' "$BACKUP_ENCRYPTION_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback \
-            --passphrase-fd 0 \
-            --decrypt --output "$verified_dump" "$encrypted"
-          pg_restore --list "$verified_dump" > "$restore_list"
-          verificar_tablas "$restore_list"
-
-          object_name="inventory-$(date -u +%Y%m%dT%H%M%SZ).dump.gpg"
-          object_key="postgres/$(date -u +%Y/%m/%d)/${object_name}"
-
-          # Formato estándar de sha256sum: "<hash>  <nombre>". El nombre debe
-          # coincidir con el archivo descargado desde R2 para que
-          # `sha256sum -c` funcione sin editar el archivo.
-          hash_cifrado="$(sha256sum "$encrypted" | awk '{print $1}')"
-          printf '%s  %s\n' "$hash_cifrado" "$object_name" > "$checksum"
-
-          endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          aws --endpoint-url "$endpoint" --region auto s3 cp "$encrypted" "s3://${R2_BUCKET_NAME}/${object_key}" --only-show-errors
-          aws --endpoint-url "$endpoint" --region auto s3 cp "$checksum" "s3://${R2_BUCKET_NAME}/${object_key}.sha256" --only-show-errors
-
-          # Comprueba que el objeto remoto tenga exactamente el tamaño del
-          # archivo cifrado local; un head-object vacío no es suficiente.
-          tamano_local="$(wc -c < "$encrypted" | tr -d '[:space:]')"
-          tamano_remoto="$(aws --endpoint-url "$endpoint" --region auto s3api head-object \
-            --bucket "$R2_BUCKET_NAME" --key "$object_key" \
-            --query ContentLength --output text)"
-          if [ "$tamano_remoto" != "$tamano_local" ]; then
-            echo "El objeto en R2 tiene un tamaño distinto (${tamano_remoto} != ${tamano_local})." >&2
-            exit 1
-          fi
-          tamano_checksum="$(aws --endpoint-url "$endpoint" --region auto s3api head-object \
-            --bucket "$R2_BUCKET_NAME" --key "${object_key}.sha256" \
-            --query ContentLength --output text)"
-          if [ "$tamano_checksum" = "0" ] || [ "$tamano_checksum" = "None" ]; then
-            echo "El archivo de suma SHA-256 no se subió correctamente." >&2
-            exit 1
-          fi
-          # Verify bytes downloaded from R2, not only the object size.
-          aws --endpoint-url "$endpoint" --region auto s3 cp "s3://${R2_BUCKET_NAME}/${object_key}" "$remote_encrypted" --only-show-errors
-          aws --endpoint-url "$endpoint" --region auto s3 cp "s3://${R2_BUCKET_NAME}/${object_key}.sha256" "$remote_checksum" --only-show-errors
-          cmp --silent "$checksum" "$remote_checksum"
-          hash_remoto="$(sha256sum "$remote_encrypted" | awk '{print $1}')"
-          test "$hash_remoto" = "$hash_cifrado"
-          echo "Respaldo cifrado y verificado en R2: ${object_key} (${tamano_local} bytes, sha256=${hash_cifrado})"
-
-      - name: Diagnóstico (sin credenciales)
-        if: failure()
-        shell: bash
-        env:
-          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          BACKUP_ENCRYPTION_PASSPHRASE: ${{ secrets.BACKUP_ENCRYPTION_PASSPHRASE }}
-        run: |
-          set -u
-          echo "=== Diagnóstico del respaldo (no se muestran secretos) ==="
-          echo "SUPABASE_DB_URL definida: $([ -n "${SUPABASE_DB_URL:-}" ] && echo si || echo NO)"
-          echo "R2_ACCOUNT_ID definido: $([ -n "${R2_ACCOUNT_ID:-}" ] && echo si || echo NO)"
-          echo "R2_BUCKET_NAME definido: $([ -n "${R2_BUCKET_NAME:-}" ] && echo si || echo NO)"
-          echo "R2_ACCESS_KEY_ID definido: $([ -n "${R2_ACCESS_KEY_ID:-}" ] && echo si || echo NO)"
-          echo "R2_SECRET_ACCESS_KEY definido: $([ -n "${R2_SECRET_ACCESS_KEY:-}" ] && echo si || echo NO)"
-          echo "BACKUP_ENCRYPTION_PASSPHRASE definida: $([ -n "${BACKUP_ENCRYPTION_PASSPHRASE:-}" ] && echo si || echo NO)"
-          echo "pg_dump: $(pg_dump --version 2>&1 || echo no disponible)"
-          echo "pg_restore: $(pg_restore --version 2>&1 || echo no disponible)"
-          echo "gpg: $(gpg --version 2>&1 | head -n 1 || echo no disponible)"
-          echo "aws: $(aws --version 2>&1 || echo no disponible)"
-          if [ -n "${SUPABASE_DB_URL:-}" ]; then
-            python3 - "$SUPABASE_DB_URL" <<'PY'
-          import sys
-          from urllib.parse import urlsplit
-          url = urlsplit(sys.argv[1])
-          print(f"esquema={url.scheme} host={url.hostname or 'desconocido'} puerto={url.port or 'predeterminado'} base={url.path.lstrip('/') or 'desconocida'}")
-          print("usuario y contraseña: ocultos")
-          PY
-          fi
-          echo "Revisa también los logs del paso que falló; GitHub no permite leer secretos desde el repositorio."
+      - uses: actions/checkout@v4
+      - name: Test encrypted backup and disposable restore with fictional data
+        shell: powershell
+        run: ./scripts/test-backup-local.ps1

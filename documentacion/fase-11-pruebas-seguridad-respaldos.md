@@ -21,8 +21,8 @@ Este repositorio no tiene un ejecutor de pruebas automatizadas de interfaz ni cr
 | Importación CSV | Pendiente en staging | Probar la plantilla, filas incompletas, fechas erróneas y duplicados |
 | Interfaz móvil | Pendiente de comprobación manual | Usar la matriz de dispositivos/navegadores |
 | Errores de red y datos inválidos | Pendiente en staging | Confirmar mensajes visibles y que la pantalla siga operativa |
-| Respaldo externo automático | Requiere configurar secretos | Completar la configuración de GitHub Actions y R2 |
-| Restauración documentada | Pendiente de ejecutar | Restaurar un respaldo en un proyecto Supabase aislado |
+| Respaldo local cifrado | Procedimiento disponible, no programado | Crear copia y comprobar restauracion; ver operaciones/restauracion-backup.md |
+| Restauracion local del procedimiento | Probada con datos ficticios | No acredita un calendario de produccion ni binarios Storage/Drive |
 | Consumo del plan gratuito | Pendiente de medir | Revisar uso de base, almacenamiento, egreso y funciones en Supabase |
 
 El flujo de CI ejecuta lint y build en cada pull request y en cada push a `main`. No sustituye pruebas funcionales ni una revisión del servicio real.
@@ -53,40 +53,25 @@ El script `supabase/tests/rls.sql` cubre acceso anónimo y los roles `admin`, `t
 
 El script crea fixtures y hace pruebas de escritura dentro de bloques PL/pgSQL que revierten sus cambios al terminar. Aun así, no ejecutarlo en producción: requiere privilegios SQL y puede fallar si el esquema de staging no coincide. Revisar que el resultado no contenga filas `FALLA`; un error de ejecución no equivale a una prueba aprobada.
 
-## Respaldo automático fuera de Supabase
+## Respaldo local sin almacenamiento de pago
 
-La acción `.github/workflows/backup-postgres.yml` está preparada para ejecutar un `pg_dump` PostgreSQL diario a las 08:00 UTC (03:00 en Perú) y bajo demanda. Usa `pg_dump` cliente 18, verifica el dump antes y después del cifrado AES-256 y lo envía a un bucket Cloudflare R2 mediante S3 API. El repositorio no contiene las credenciales ni el respaldo.
+El workflow backup-postgres.yml solo valida scripts con datos ficticios y no
+conserva respaldos de produccion. No requiere servicios de almacenamiento ni secretos.
+Usar scripts/backup-postgres-local.ps1 y scripts/verificar-restaurar-local.ps1
+segun [la guia operativa](operaciones/restauracion-backup.md). Registrar una tarea
+Windows es un paso adicional: no afirmar automatizacion hasta comprobar ejecuciones
+y restauracion de una copia reciente. Storage y Drive requieren copias independientes.
 
-Antes de habilitarla:
+## Prueba de restauracion
 
-1. Crear en Cloudflare R2 un bucket privado dedicado al respaldo; configurar una regla de ciclo de vida para eliminar objetos del prefijo `postgres/` después de 30 días.
-2. Crear un token/credencial R2 limitado a lectura/escritura del bucket dedicado. No usar una credencial de administrador global.
-3. En GitHub, abrir **Settings → Secrets and variables → Actions → New repository secret** y crear:
-   - `SUPABASE_DB_URL`: cadena de conexión PostgreSQL del proyecto (preferir conexión directa o pooler de sesión, no pooler transaccional).
-   - `R2_ACCOUNT_ID` y `R2_BUCKET_NAME`.
-   - `R2_ACCESS_KEY_ID` y `R2_SECRET_ACCESS_KEY` del token R2 limitado.
-   - `BACKUP_ENCRYPTION_PASSPHRASE`: frase larga, aleatoria y exclusiva del respaldo.
-4. Guardar la frase de cifrado en un gestor institucional fuera de GitHub. Sin ella, un dump descargado no se puede descifrar.
-5. Ejecutar **Actions → Encrypted PostgreSQL backup → Run workflow** y comprobar que finaliza correctamente y que el archivo `.dump.gpg` y el `.sha256` aparecen en R2.
-6. Si la política de red de Supabase bloquea GitHub-hosted runners, no abrir la base a Internet de forma amplia. Usar un runner privado con IP fija autorizada o ejecutar el proceso desde una red de confianza.
-
-La tarea se ejecuta diariamente; la retención de 30 días se aplica mediante el ciclo de vida configurado en R2, no borrando respaldos desde el workflow. La cuenta de almacenamiento y la configuración de lifecycle son responsabilidad del administrador del bucket.
-
-### Prueba de restauración
-
-Realizarla en una instancia Supabase de staging aislada, con versión compatible y sin datos de usuarios reales:
-
-1. Descargar el dump cifrado y su suma desde R2; validar `sha256sum -c` usando el valor del `.sha256`.
-2. Descifrarlo con la frase del gestor institucional y confirmar que `pg_restore --list` termina sin error.
-3. Restaurar a staging siguiendo el procedimiento de recuperación de Supabase para la versión del proyecto; nunca restaurar con `--clean` sobre producción.
-4. Verificar tablas y conteos de equipos, mantenimientos, movimientos y catálogos; probar inicio de sesión, políticas RLS y funciones de la aplicación.
-5. Documentar fecha, versión, duración, resultado, errores y acciones correctivas. Borrar staging con el procedimiento aprobado una vez concluida la validación.
-
-El dump lógico no incluye objetos de Google Drive ni sustituye los respaldos administrados/PITR del proveedor. Verificar aparte los respaldos y cuotas de esos servicios.
+Seguir operaciones/restauracion-backup.md. El verificador solo admite loopback y
+crea una base descartable nueva; compara conteos con el propio snapshot. No restaura
+ACL originales ni certifica servicios gestionados, por lo que una recuperacion
+completa requiere pruebas adicionales. No usar produccion como destino de ensayo.
 
 ## Consumo de recursos
 
-Para validar el plan gratuito, registrar semanalmente en Supabase **Settings → Usage** (la ubicación puede variar en el panel): tamaño de base de datos, almacenamiento de archivos, egreso, usuarios activos de Auth, invocaciones/duración de Edge Functions y uso de Realtime. Comparar con los límites que muestra el plan contratado y revisar alertas/overages antes de cada publicación. Registrar fecha y valores en la bitácora operativa. Incluir además el almacenamiento/operaciones de R2 y la ejecución de GitHub Actions; los límites gratuitos y precios pueden cambiar y deben confirmarse en las consolas de los proveedores. No se midieron cuotas durante este cambio.
+Para validar el plan gratuito, registrar semanalmente en Supabase **Settings → Usage** (la ubicación puede variar en el panel): tamaño de base de datos, almacenamiento de archivos, egreso, usuarios activos de Auth, invocaciones/duración de Edge Functions y uso de Realtime. Comparar con los límites que muestra el plan contratado y revisar alertas/overages antes de cada publicación. Registrar fecha y valores en la bitácora operativa. Incluir la ejecucion de GitHub Actions y el espacio del disco local; los límites gratuitos y precios pueden cambiar y deben confirmarse en las consolas de los proveedores. No se midieron cuotas durante este cambio.
 
 ## CI
 

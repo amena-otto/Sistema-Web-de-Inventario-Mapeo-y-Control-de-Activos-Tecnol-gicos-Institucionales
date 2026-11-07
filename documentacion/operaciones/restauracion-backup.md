@@ -1,154 +1,203 @@
-# Restauración segura de un respaldo PostgreSQL
+# Respaldo local cifrado para Windows, sin servicios de pago
 
-Este documento describe cómo verificar y restaurar un respaldo cifrado generado por
-`.github/workflows/backup-postgres.yml`. **Nunca debe aplicarse sobre producción sin
-una ventana de mantenimiento aprobada y un respaldo previo adicional.**
+Este procedimiento usa PostgreSQL, GnuPG y el Programador de tareas de Windows.
+No requiere R2, cuenta de almacenamiento, tarjeta ni suscripcion. No sube archivos
+ni credenciales a GitHub. No esta programado por instalar los scripts: primero hay
+que crear una copia, restaurarla y comprobar posteriormente la tarea programada.
 
-## 1. Requisitos
+## Herramientas gratuitas
 
-- `pg_restore`/`psql` de PostgreSQL 18 (o compatible con el servidor de origen).
-- `gpg` y la frase de cifrado `BACKUP_ENCRYPTION_PASSPHRASE`.
-- Credenciales de solo lectura de Cloudflare R2.
-- Una base de datos **nueva y descartable** para la prueba de restauración.
+- Windows PowerShell 5.1 o PowerShell 7 en Windows.
+- Herramientas PostgreSQL instaladas, incluyendo pg_dump, pg_restore, psql y createdb.
+  pg_dump debe tener version mayor igual que el servidor. Para pruebas locales,
+  usar tambien servidor de version igual o posterior a las herramientas que generan el dump.
+- GnuPG de [Gpg4win](https://gpg4win.org/index.html),
+  [instalador oficial](https://gnupg.org/download/index.html), o gpg incluido en Git para Windows.
+- Una instancia PostgreSQL local descartable, para restauracion. No usar Supabase
+  como destino ni una instancia local que contenga trabajo importante.
 
-## 2. Descargar el respaldo
+Referencias: [pg_dump](https://www.postgresql.org/docs/17/app-pgdump.html),
+[Programador de tareas](https://learn.microsoft.com/en-us/powershell/module/scheduledtasks/new-scheduledtaskprincipal).
 
-El workflow guarda la suma en el formato estándar de `sha256sum`
-(`<hash>  <nombre>`). Descarga el dump con el mismo nombre que el objeto remoto
-para poder verificar sin editar el archivo:
+## 1. Configurar una sola vez
 
-```bash
-key="postgres/AAAA/MM/DD/inventory-<fecha>.dump.gpg"
-name="$(basename "$key")"
-
-aws --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" \
-  --region auto \
-  s3 cp "s3://${R2_BUCKET_NAME}/${key}" "./${name}"
-
-aws --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" \
-  --region auto \
-  s3 cp "s3://${R2_BUCKET_NAME}/${key}.sha256" "./${name}.sha256"
-
-sha256sum -c "./${name}.sha256"
-```
-
-Debe imprimir `OK`. Si la verificación falla, no descifres ni restaures: vuelve a
-descargar el objeto o elige otro respaldo.
-
-## 3. Descifrar y verificar
-
-```bash
-printf '%s' "$BACKUP_ENCRYPTION_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback \
-  --passphrase-fd 0 --decrypt --output database.dump "./${name}"
-
-pg_restore --list database.dump > restore-list.txt
-for tabla in profiles equipos equipos_eliminados auditoria ambientes pabellones \
-  pisos categorias_equipos componentes relaciones_equipos fotografias_equipos \
-  mantenimientos mantenimiento_cambios_estado movimientos; do
-  grep -Eq "TABLE DATA public ${tabla}([[:space:]]|$)" restore-list.txt \
-    || { echo "Falta la tabla public.${tabla}"; exit 1; }
-done
-```
-
-El patrón exige un espacio o fin de línea después del nombre para evitar que
-`equipos` coincida con `equipos_eliminados`. `TABLE DATA` aparece aunque la tabla
-esté vacía, así que una tabla legítima sin filas no invalida el respaldo. Si falta
-alguna tabla crítica, **no continúes**: el respaldo está incompleto.
-
-## 4. Restaurar en una base descartable
-
-```bash
-createdb prueba_restauracion
-pg_restore --dbname=prueba_restauracion --no-owner --no-privileges \
-  --exit-on-error database.dump
-```
-
-Verificaciones mínimas (sin modificar datos):
-
-```sql
-select count(*) from public.equipos;
-select count(*) from public.equipos_eliminados;
-select count(*) from public.profiles;
-select count(*) from public.auditoria;
-select count(*) from public.movimientos;
-select count(*) from public.mantenimientos;
-select count(*) from public.fotografias_equipos;
-select count(*) from public.eliminaciones_pendientes;
-```
-
-Compara los conteos con el sistema de origen y revisa que los UUID y
-`codigo_institucional` se conserven.
-
-## 5. Restauración real (solo con aprobación)
-
-1. Programar una ventana de mantenimiento y bloquear escrituras de la aplicación.
-2. Crear un respaldo adicional del estado actual.
-3. Restaurar primero en una base de ensayo y validar la aplicación.
-4. Restaurar en producción con `pg_restore --clean --if-exists` **solo** si el
-   procedimiento aprobado lo indica; `--clean` elimina objetos existentes.
-5. Verificar RLS, funciones, triggers y Edge Functions antes de reabrir el sistema.
-6. Documentar fecha, responsable, respaldo usado y verificaciones realizadas.
-
-## 6. Diagnóstico de fallos del workflow
-
-Si el workflow falla, revisa el paso `Diagnóstico (sin credenciales)`. Muestra
-únicamente si cada secreto está definido y el host/puerto (sin usuario ni
-contraseña). Causas frecuentes:
-
-- `SUPABASE_DB_URL` apunta al pooler de transacciones (puerto `6543`), que no
-  admite `pg_dump`. Usa la conexión directa o el pooler en modo sesión (`5432`).
-- Falta uno de los secretos `R2_*` o `BACKUP_ENCRYPTION_PASSPHRASE`.
-- La URL no incluye `sslmode=require` ni un modo SSL compatible. El workflow
-  define `PGSSLMODE=require`, pero la URL puede sobrescribirlo.
-- Credenciales de R2 sin permiso de escritura/lectura sobre el bucket.
-- Región de R2: el workflow usa `--region auto`, que es el valor admitido por R2.
-
-Los logs completos de GitHub Actions solo los puede revisar un administrador del
-repositorio; no contienen secretos en claro, pero sí el detalle del error.
-
-
-## Evidencia adicional del 7 de noviembre de 2026
-
-Se genero un archivo custom completo con pg_dump 18.6 usando la conexion
-administrativa temporal de la CLI (rol postgres), sin persistir credenciales.
-Una conexion sin ese rol no tenia permiso sobre auth; ese intento fallido no
-se considero respaldo y fue sustituido por el archivo completo correcto.
-
-Ubicacion privada local, fuera del repositorio:
-`%LOCALAPPDATA%\Codex\inventory-stabilization-20261107`.
-El archivo conservado es `production.dump.gpg`; su checksum esta en
-`production.dump.gpg.sha256`. SHA256:
-`8d7318b1a9688d3baaf92878a8ff951e3fe7b351cbee999e026ff46c39d1fa82`.
-La clave aleatoria esta protegida con Windows DPAPI en `backup-key.dpapi`;
-solo la misma cuenta Windows puede recuperarla. No subir ni compartir esa clave.
-No constituye una copia externa mientras no se complete la configuracion de R2.
-
-Para descifrar con la misma cuenta, desde PowerShell (sin imprimir la clave):
+Desde la raiz del repositorio:
 
 ```powershell
-$carpetaRespaldo = Join-Path $env:LOCALAPPDATA 'Codex\inventory-stabilization-20261107'
-$claveSegura = Get-Content -LiteralPath (Join-Path $carpetaRespaldo 'backup-key.dpapi') | ConvertTo-SecureString
-$credencialRespaldo = New-Object System.Net.NetworkCredential('', $claveSegura)
-$credencialRespaldo.Password | & 'C:\Program Files\Git\usr\bin\gpg.exe' --batch --yes --pinentry-mode loopback --passphrase-fd 0 --decrypt --output (Join-Path $carpetaRespaldo 'restore.dump') (Join-Path $carpetaRespaldo 'production.dump.gpg')
-Remove-Variable credencialRespaldo, claveSegura
+.\scripts\backup-postgres-local.ps1 -Configurar
 ```
 
-Antes de descifrar, comparar Get-FileHash SHA256 con el archivo checksum.
-No ejecutar una restauracion sobre produccion con estas instrucciones.
+Los campos se solicitan interactivamente. Usar host de conexion directa o pooler
+**de sesion**, puerto 5432; nunca el pooler transaccional 6543. Indicar el usuario
+PostgreSQL correspondiente al host, no una cuenta de acceso a la web del inventario.
+No pegar URLs ni claves en comandos, historial, .env versionados o archivos del repo.
+La conexion remota exige SSL y se opera en modo de solo lectura. El script usa SET ROLE
+postgres para poder incluir Auth; si los permisos son insuficientes, falla en lugar de
+producir una copia incompleta. Un usuario tecnico necesita acceso administrativo de
+respaldo autorizado; no elevar ni cambiar permisos de produccion desde este procedimiento.
 
-La restauracion comprobada uso PostgreSQL 18.6 local, puerto 55439, exclusivamente
-loopback, con esquemas auth, public, private y storage. Se prepararon roles,
-pgcrypto, uuid-ossp y supabase_realtime. pg_restore uso --no-owner y
---no-privileges; no certifica la recuperacion de todos los privilegios originales,
-Vault ni servicios gestionados. Las ACL necesitan restauracion/verificacion en
-un staging Supabase compatible antes de aprobar produccion.
+Elegir una frase de cifrado de al menos 20 caracteres y guardarla tambien en un
+medio institucional offline seguro. Las credenciales y la frase se guardan con DPAPI
+en `%LOCALAPPDATA%\InventarioInstitucional\Privado\backup-config.xml`, con ACL solo
+para la cuenta Windows actual. Cambiar de cuenta o perder su perfil puede impedir
+abrir ese archivo: conservar la frase offline es indispensable para recuperar el .gpg.
+La configuracion no sobrescribe archivos existentes; para rotarla usar otro ConfigPath.
 
-Se recuperaron 47 equipos, 3 perfiles, 3 usuarios y 434 registros de auditoria.
-Las huellas de filas completas de equipos, perfiles y auditoria coinciden con
-produccion. No se eliminaron equipos institucionales para probar: el SQL usa
-UUID ficticio y rollback; la prueba concurrente usa otra base descartable.
+Nunca activar transcripciones de PowerShell ni imprimir objetos de configuracion o
+variables de entorno que contengan claves. El cifrado protege la copia guardada;
+la cuenta Windows que ejecuta el procedimiento puede acceder a los datos.
 
-Los binarios de Storage y Google Drive no estan incluidos en pg_dump, aunque
-sus metadatos aparezcan en el archivo. No se verifico copia externa de esos binarios.
-Los logs del workflow remoto del 7 de noviembre muestran secretos R2/cifrado
-no configurados; no se debe describir ese workflow como operativo hasta repararlos.
+## 2. Crear una copia local
+
+```powershell
+$copia = .\scripts\backup-postgres-local.ps1
+$copia.Archivo
+```
+
+Por defecto se guarda fuera de Git en
+`%LOCALAPPDATA%\InventarioInstitucional\Respaldos`.
+El nombre incorpora fecha UTC e identificador unico. Se genera:
+
+- `.dump.gpg`: archivo PostgreSQL custom completo cifrado con AES256.
+- `.dump.gpg.sha256`: checksum SHA256 del cifrado.
+- `.dump.gpg.json`: version, fecha y estado **CifradoYDescifradoVerificados**.
+
+Se verifican tablas institucionales y auth.users, y se compara el dump original
+con su descifrado antes de marcar la copia como creada. Los dumps sin cifrar se
+crean en una carpeta temporal privada y se retiran en finally. Si se interrumpe
+abruptamente Windows, revisar carpetas .work-* o .verify-* antes de compartir discos.
+No se promete borrado irrecuperable de datos en disco.
+
+**Este resultado todavia NO acredita restauracion ni automatizacion.** No sustituye
+el paso siguiente. Los scripts rechazan cualquier destino dentro de un repositorio,
+enlaces/junctions y carpetas existentes sin permisos privados. No cambian permisos
+de carpetas ajenas. Para otro disco, elegir una subcarpeta nueva y usarla siempre:
+
+```powershell
+$copia = .\scripts\backup-postgres-local.ps1 -Destino 'E:\InventarioPrivado\Respaldos'
+```
+
+No hay borrado automatico por antiguedad. Revisar espacio y conservar varias copias
+verificadas. Copiar cifrado y checksum a un disco externo institucional existente,
+desconectarlo y guardarlo aparte. Una unica copia en el mismo PC no protege contra
+perdida del equipo, averia, incendio o ransomware. No es obligatorio contratar almacenamiento.
+
+## 3. Restaurar y verificar en PostgreSQL local
+
+Usar una instancia PostgreSQL local descartable activa. El ejemplo usa puerto 5432;
+si se preparo otra instancia, indicar su puerto. La credencial es exclusivamente
+**del PostgreSQL local**, distinta de la configuracion de Supabase:
+
+```powershell
+$adminLocal = Get-Credential -UserName 'postgres' -Message 'Administrador de la instancia LOCAL descartable'
+.\scripts\verificar-restaurar-local.ps1 -Archivo $copia.Archivo -RestorePort 5432 -RestoreCredential $adminLocal
+Remove-Variable adminLocal
+```
+
+Para una copia previa, sustituir Archivo por una ruta local absoluta al .dump.gpg;
+conservar al lado su .sha256. ConfigPath y la cuenta Windows deben ser los utilizados
+para crear la copia. El verificador no consulta Supabase: solo usa la frase local.
+
+El destino esta fijado a 127.0.0.1. Se crea una base nueva con nombre aleatorio
+`inventario_prueba_*`; no admite un nombre de base existente, no ejecuta DROP ni
+--clean, y no restaura en la base postgres de administracion. Se necesita un rol
+local que pueda crear bases y roles. Los roles Supabase ausentes se crean NOLOGIN
+solo en esa instancia local; no se alteran roles preexistentes.
+
+El modo predeterminado AplicacionSupabase restaura auth/public/private/storage,
+prepara pgcrypto, uuid-ossp y la publicacion supabase_realtime, y compara los conteos
+de todas las tablas COPY reconocidas en esos esquemas con el snapshot del propio
+archivo, incluyendo tablas vacias. El dump contiene mas esquemas; Vault, Realtime
+como servicio, Auth como servicio y otras extensiones gestionadas necesitan su propio
+entorno compatible. No se afirma que la adaptacion local recupere esos servicios.
+
+Si se necesita probar todos los objetos y el destino tiene sus extensiones:
+
+```powershell
+.\scripts\verificar-restaurar-local.ps1 -Archivo $copia.Archivo -RestorePort 5432 -RestoreCredential (Get-Credential postgres) -Modo Completo
+```
+
+Este modo falla ante cualquier incompatibilidad; nunca convierte una restauracion
+parcial en exito. Ambos modos usan --no-owner y --no-privileges: **no certifican los
+propietarios ni ACL originales**. La presencia de politicas RLS no reemplaza probar
+permisos por rol en un entorno compatible. El archivo custom original conserva sus
+metadatos; el procedimiento de recuperacion completa debe validar tambien esos permisos.
+
+Solo tras restauracion SQL y conteos correctos aparece
+`.dump.gpg.restauracion.json`, vinculado al SHA256 de esa copia. Registrar tambien
+UUID, codigos, series y recorridos funcionales para una recuperacion institucional
+completa. Se conserva la base de prueba para inspeccion; los archivos descifrados
+temporales se retiran. Eliminar manualmente solo esa base ficticia tras revisarla.
+No subir bases, dumps, credenciales ni reportes institucionales a GitHub o sus artifacts.
+
+## 4. Programar sin pagar servicios
+
+Primero completar los pasos 1-3 con la misma cuenta Windows que ejecutara la tarea.
+La siguiente orden REGISTRA una tarea diaria local a las 18:00, hora del equipo.
+Ejecutarla es una decision administrativa; el repositorio no la registra solo.
+
+```powershell
+$scriptRespaldo = (Resolve-Path '.\scripts\backup-postgres-local.ps1').Path
+$usuarioRespaldo = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+$accionRespaldo = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Argument ('-NoProfile -NonInteractive -File "{0}"' -f $scriptRespaldo)
+$horarioRespaldo = New-ScheduledTaskTrigger -Daily -At '18:00'
+$identidadRespaldo = New-ScheduledTaskPrincipal -UserId $usuarioRespaldo -LogonType Interactive -RunLevel Limited
+$opcionesRespaldo = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Hours 2)
+Register-ScheduledTask -TaskName 'Inventario-RespaldoLocal' -Action $accionRespaldo -Trigger $horarioRespaldo -Principal $identidadRespaldo -Settings $opcionesRespaldo -Description 'Copia PostgreSQL cifrada LOCAL; requiere verificacion de restauracion independiente'
+Start-ScheduledTask -TaskName 'Inventario-RespaldoLocal'
+```
+
+Este ejemplo usa los destinos predeterminados. Para un destino distinto, agregar
+`-Destino` y `-ConfigPath` a los argumentos de la tarea, con rutas entre comillas,
+**nunca claves**. No usar SYSTEM: DPAPI corresponde a la cuenta que configuro el respaldo.
+La tarea Interactive requiere que esa cuenta tenga sesion iniciada; la PC debe estar
+encendida, con red y espacio. StartWhenAvailable no crea copias durante un apagado.
+Si se requiere ejecutar sin sesion, configurarlo en la interfaz del Programador,
+con la misma cuenta y su credencial Windows gestionada por el sistema; comprobar
+DPAPI, red y rutas mediante una ejecucion real antes de darlo por operativo.
+No desactivar globalmente la politica de ejecucion; seguir la politica institucional
+de scripts firmados o desbloqueados y probar tambien en modo NonInteractive.
+
+Comprobar al terminar (no basta registrar la tarea):
+
+```powershell
+Get-ScheduledTaskInfo -TaskName 'Inventario-RespaldoLocal' | Select-Object LastRunTime,LastTaskResult,NextRunTime
+$ultimaCopia = Get-ChildItem "$env:LOCALAPPDATA\InventarioInstitucional\Respaldos" -Filter '*.dump.gpg' | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+.\scripts\verificar-restaurar-local.ps1 -Archivo $ultimaCopia.FullName -RestorePort 5432 -RestoreCredential (Get-Credential postgres)
+```
+
+Exigir LastTaskResult=0, fecha reciente, checksum valido y restauracion comprobada
+para ese mismo archivo; habilitar/revisar historial del Programador. Repetir la
+restauracion periodicamente y despues de cambios de esquema o herramientas. Aun
+con tarea operativa no hay proteccion completa de archivos externos ni del PC.
+Este cambio no registra ninguna tarea ni acredita un calendario institucional activo.
+
+## 5. Fotografias y archivos independientes
+
+pg_dump **no contiene los binarios** de Supabase Storage ni Google Drive.
+Descargar por separado los buckets institucionales y exportar/copiar las carpetas
+autorizadas de Drive a un medio local institucional, conservando rutas e IDs para
+reconciliar con fotografias_equipos. No borrar ni mover originales para respaldarlos.
+Tambien hay que verificar que esas copias independientes pueden abrirse y recuperarse;
+no se realizaron exportaciones de esos archivos en este cambio. Un respaldo SQL
+correcto no demuestra que todas las fotografias sean recuperables.
+
+## 6. GitHub y pruebas del procedimiento
+
+El workflow backup-postgres.yml ahora solo ejecuta scripts con datos ficticios en
+Windows. No tiene schedule, secretos de produccion, AWS/R2 ni pasos upload-artifact.
+Las cinco dependencias retiradas son R2_ACCOUNT_ID, R2_BUCKET_NAME,
+R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY y BACKUP_ENCRYPTION_PASSPHRASE.
+Tampoco necesita SUPABASE_DB_URL en Actions. Si esos secretos existen en Settings,
+un administrador puede retirarlos tras comprobar que ningun otro workflow los usa;
+ninguno se copia a archivos ni se recupera su valor desde GitHub.
+
+```powershell
+.\scripts\test-backup-local.ps1
+```
+
+Esta prueba crea su propia instancia temporal PostgreSQL en loopback, usa datos y
+claves ficticias, verifica cifrado, restauracion y conteos, rechazo de corrupcion y
+rutas dentro de Git, y detiene la instancia al terminar. No toca Supabase ni acredita
+una copia reciente de produccion. Los antiguos respaldos locales del 7 de noviembre
+siguen siendo archivos privados fuera del repo; no se los presenta como calendario activo.
