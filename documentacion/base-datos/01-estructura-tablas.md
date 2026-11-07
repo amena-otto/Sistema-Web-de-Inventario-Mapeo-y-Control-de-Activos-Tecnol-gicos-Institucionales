@@ -17,16 +17,17 @@ La base de datos está organizada en las siguientes tablas:
 2. auditoria
 3. categorias_equipos
 4. componentes
-5. equipos
-6. equipos_eliminados
-7. fotografias_equipos
-8. mantenimientos
-9. mantenimiento_cambios_estado
-10. movimientos
-11. pabellones
-12. pisos
-13. profiles
-14. relaciones_equipos
+5. eliminaciones_pendientes
+6. equipos
+7. equipos_eliminados
+8. fotografias_equipos
+9. mantenimientos
+10. mantenimiento_cambios_estado
+11. movimientos
+12. pabellones
+13. pisos
+14. profiles
+15. relaciones_equipos
 
 ## 3. Columnas y tipos de datos
 

@@ -53,6 +53,7 @@ jobs:
           AWS_REQUEST_CHECKSUM_CALCULATION: when_required
           AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
           PGSSLMODE: require
+          PGCONNECT_TIMEOUT: '30'
         run: |
           set -euo pipefail
 
@@ -98,18 +99,36 @@ jobs:
           checksum="${workdir}/database.dump.gpg.sha256"
           trap 'rm -f -- "$dump" "$restore_list" "$verified_dump" "$encrypted" "$checksum"; rmdir -- "$workdir"' EXIT
 
-          pg_dump --dbname="$SUPABASE_DB_URL" --format=custom --file="$dump"
+          pg_dump --dbname="$SUPABASE_DB_URL" --format=custom --file="$dump" \
+            --lock-wait-timeout=30s
           if [ ! -s "$dump" ]; then
             echo "pg_dump generó un archivo vacío." >&2
             exit 1
           fi
           pg_restore --list "$dump" > "$restore_list"
-          for tabla in equipos profiles auditoria movimientos mantenimientos fotografias_equipos; do
-            if ! grep -q "TABLE DATA public ${tabla}\b" "$restore_list"; then
-              echo "El respaldo no contiene la tabla esperada: public.${tabla}" >&2
-              exit 1
-            fi
-          done
+
+          # Verifica la presencia exacta de cada tabla crítica. El patrón exige
+          # un espacio o fin de línea después del nombre para que "equipos" no
+          # coincida con "equipos_eliminados". TABLE DATA aparece incluso si la
+          # tabla está vacía, así que una tabla legítima vacía no invalida el
+          # respaldo.
+          tablas_criticas=(
+            profiles equipos equipos_eliminados auditoria
+            ambientes pabellones pisos categorias_equipos
+            componentes relaciones_equipos fotografias_equipos
+            mantenimientos mantenimiento_cambios_estado movimientos
+          )
+          verificar_tablas() {
+            local lista="$1"
+            local tabla
+            for tabla in "${tablas_criticas[@]}"; do
+              if ! grep -Eq "TABLE DATA public ${tabla}([[:space:]]|$)" "$lista"; then
+                echo "El respaldo no contiene la tabla esperada: public.${tabla}" >&2
+                return 1
+              fi
+            done
+          }
+          verificar_tablas "$restore_list"
           printf '%s' "$BACKUP_ENCRYPTION_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback \
             --passphrase-fd 0 \
             --symmetric --cipher-algo AES256 \
@@ -117,15 +136,40 @@ jobs:
           printf '%s' "$BACKUP_ENCRYPTION_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback \
             --passphrase-fd 0 \
             --decrypt --output "$verified_dump" "$encrypted"
-          pg_restore --list "$verified_dump" > /dev/null
-          sha256sum "$encrypted" | awk '{print $1}' > "$checksum"
+          pg_restore --list "$verified_dump" > "$restore_list"
+          verificar_tablas "$restore_list"
 
-          object_key="postgres/$(date -u +%Y/%m/%d)/inventory-$(date -u +%Y%m%dT%H%M%SZ).dump.gpg"
+          object_name="inventory-$(date -u +%Y%m%dT%H%M%SZ).dump.gpg"
+          object_key="postgres/$(date -u +%Y/%m/%d)/${object_name}"
+
+          # Formato estándar de sha256sum: "<hash>  <nombre>". El nombre debe
+          # coincidir con el archivo descargado desde R2 para que
+          # `sha256sum -c` funcione sin editar el archivo.
+          hash_cifrado="$(sha256sum "$encrypted" | awk '{print $1}')"
+          printf '%s  %s\n' "$hash_cifrado" "$object_name" > "$checksum"
+
           endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
           aws --endpoint-url "$endpoint" --region auto s3 cp "$encrypted" "s3://${R2_BUCKET_NAME}/${object_key}" --only-show-errors
           aws --endpoint-url "$endpoint" --region auto s3 cp "$checksum" "s3://${R2_BUCKET_NAME}/${object_key}.sha256" --only-show-errors
-          aws --endpoint-url "$endpoint" --region auto s3api head-object --bucket "$R2_BUCKET_NAME" --key "$object_key" > /dev/null
-          echo "Respaldo cifrado y verificado en R2: ${object_key}"
+
+          # Comprueba que el objeto remoto tenga exactamente el tamaño del
+          # archivo cifrado local; un head-object vacío no es suficiente.
+          tamano_local="$(wc -c < "$encrypted" | tr -d '[:space:]')"
+          tamano_remoto="$(aws --endpoint-url "$endpoint" --region auto s3api head-object \
+            --bucket "$R2_BUCKET_NAME" --key "$object_key" \
+            --query ContentLength --output text)"
+          if [ "$tamano_remoto" != "$tamano_local" ]; then
+            echo "El objeto en R2 tiene un tamaño distinto (${tamano_remoto} != ${tamano_local})." >&2
+            exit 1
+          fi
+          tamano_checksum="$(aws --endpoint-url "$endpoint" --region auto s3api head-object \
+            --bucket "$R2_BUCKET_NAME" --key "${object_key}.sha256" \
+            --query ContentLength --output text)"
+          if [ "$tamano_checksum" = "0" ] || [ "$tamano_checksum" = "None" ]; then
+            echo "El archivo de suma SHA-256 no se subió correctamente." >&2
+            exit 1
+          fi
+          echo "Respaldo cifrado y verificado en R2: ${object_key} (${tamano_local} bytes, sha256=${hash_cifrado})"
 
       - name: Diagnóstico (sin credenciales)
         if: failure()

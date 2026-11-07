@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2'
+import { normalizarListaArchivos } from '../_shared/eliminacion.ts'
 
 
 const googleTokenUrl = 'https://oauth2.googleapis.com/token'
@@ -730,12 +731,35 @@ async function limpiarArchivosEquipo(request: Request) {
   }
 
   // Solo se permiten archivos que pertenecen realmente al equipo indicado.
-  const { data: fotografias, error } = await adminClient
-    .from('fotografias_equipos')
-    .select('drive_file_id')
-    .eq('equipo_id', body.equipoId)
+  // Antes de la RPC la fuente es fotografias_equipos; después de la RPC esas
+  // filas ya no existen y la lista autorizada queda en eliminaciones_pendientes.
+  const [
+    { data: fotografias, error },
+    { data: pendiente, error: pendienteError },
+  ] = await Promise.all([
+    adminClient
+      .from('fotografias_equipos')
+      .select('drive_file_id')
+      .eq('equipo_id', body.equipoId),
+    adminClient
+      .from('eliminaciones_pendientes')
+      .select('drive_file_ids')
+      .eq('equipo_id', body.equipoId)
+      .maybeSingle(),
+  ])
   if (error) {
     console.error('No se pudieron verificar los archivos del equipo:', error.message)
+    throw new Error('No se pudieron verificar las fotografías del equipo.')
+  }
+  if (
+    pendienteError &&
+    pendienteError.code !== '42P01' &&
+    pendienteError.code !== 'PGRST205'
+  ) {
+    console.error(
+      'No se pudo verificar la limpieza pendiente:',
+      pendienteError.message,
+    )
     throw new Error('No se pudieron verificar las fotografías del equipo.')
   }
   const permitidos = new Set(
@@ -743,6 +767,9 @@ async function limpiarArchivosEquipo(request: Request) {
       .map((foto) => foto.drive_file_id)
       .filter((id): id is string => Boolean(id)),
   )
+  for (const id of normalizarListaArchivos(pendiente?.drive_file_ids)) {
+    permitidos.add(id)
+  }
   if (body.driveFileIds.some((id: string) => !permitidos.has(id))) {
     return respuestaJson(
       { error: 'Uno de los archivos no pertenece al equipo indicado.' },

@@ -13,35 +13,47 @@ una ventana de mantenimiento aprobada y un respaldo previo adicional.**
 
 ## 2. Descargar el respaldo
 
-```bash
-aws --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" \
-  --region auto \
-  s3 cp "s3://${R2_BUCKET_NAME}/postgres/AAAA/MM/DD/inventory-<fecha>.dump.gpg" \
-  ./database.dump.gpg
-
-aws --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" \
-  --region auto \
-  s3 cp "s3://${R2_BUCKET_NAME}/postgres/AAAA/MM/DD/inventory-<fecha>.dump.gpg.sha256" \
-  ./database.dump.gpg.sha256
-```
-
-Compara el SHA-256:
+El workflow guarda la suma en el formato estándar de `sha256sum`
+(`<hash>  <nombre>`). Descarga el dump con el mismo nombre que el objeto remoto
+para poder verificar sin editar el archivo:
 
 ```bash
-sha256sum database.dump.gpg
-cat database.dump.gpg.sha256
+key="postgres/AAAA/MM/DD/inventory-<fecha>.dump.gpg"
+name="$(basename "$key")"
+
+aws --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" \
+  --region auto \
+  s3 cp "s3://${R2_BUCKET_NAME}/${key}" "./${name}"
+
+aws --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" \
+  --region auto \
+  s3 cp "s3://${R2_BUCKET_NAME}/${key}.sha256" "./${name}.sha256"
+
+sha256sum -c "./${name}.sha256"
 ```
+
+Debe imprimir `OK`. Si la verificación falla, no descifres ni restaures: vuelve a
+descargar el objeto o elige otro respaldo.
 
 ## 3. Descifrar y verificar
 
 ```bash
 printf '%s' "$BACKUP_ENCRYPTION_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback \
-  --passphrase-fd 0 --decrypt --output database.dump database.dump.gpg
+  --passphrase-fd 0 --decrypt --output database.dump "./${name}"
 
-pg_restore --list database.dump | grep -E 'TABLE DATA public (equipos|profiles|auditoria|movimientos|mantenimientos|fotografias_equipos)'
+pg_restore --list database.dump > restore-list.txt
+for tabla in profiles equipos equipos_eliminados auditoria ambientes pabellones \
+  pisos categorias_equipos componentes relaciones_equipos fotografias_equipos \
+  mantenimientos mantenimiento_cambios_estado movimientos; do
+  grep -Eq "TABLE DATA public ${tabla}([[:space:]]|$)" restore-list.txt \
+    || { echo "Falta la tabla public.${tabla}"; exit 1; }
+done
 ```
 
-Si falta alguna de esas tablas, **no continúes**: el respaldo está incompleto.
+El patrón exige un espacio o fin de línea después del nombre para evitar que
+`equipos` coincida con `equipos_eliminados`. `TABLE DATA` aparece aunque la tabla
+esté vacía, así que una tabla legítima sin filas no invalida el respaldo. Si falta
+alguna tabla crítica, **no continúes**: el respaldo está incompleto.
 
 ## 4. Restaurar en una base descartable
 
@@ -55,11 +67,13 @@ Verificaciones mínimas (sin modificar datos):
 
 ```sql
 select count(*) from public.equipos;
+select count(*) from public.equipos_eliminados;
 select count(*) from public.profiles;
 select count(*) from public.auditoria;
 select count(*) from public.movimientos;
 select count(*) from public.mantenimientos;
 select count(*) from public.fotografias_equipos;
+select count(*) from public.eliminaciones_pendientes;
 ```
 
 Compara los conteos con el sistema de origen y revisa que los UUID y

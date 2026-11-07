@@ -20,6 +20,7 @@
     "tailwindcss": "^4.3.3"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.15",
     "@eslint/js": "^10.0.1",
     "@types/node": "^24.19.2",
     "@types/qrcode": "^1.5.6",

@@ -709,14 +709,22 @@ export async function reactivarEquipo(id: string) {
   if (error) throw error
 }
 
+export type ResultadoEliminacionEquipo = {
+  limpiezaCompleta: boolean
+  advertencia: string | null
+}
+
 export async function eliminarEquipoDadoDeBaja(
   id: string,
   codigoInstitucional: string,
-): Promise<void> {
-  const { data, error } = await supabase.functions.invoke<{ success: boolean }>(
-    'admin-eliminar-equipo',
-    { body: { equipoId: id, codigoInstitucional } },
-  )
+): Promise<ResultadoEliminacionEquipo> {
+  const { data, error } = await supabase.functions.invoke<{
+    success: boolean
+    limpiezaCompleta?: boolean
+    advertencia?: string | null
+  }>('admin-eliminar-equipo', {
+    body: { equipoId: id, codigoInstitucional },
+  })
 
   if (error) {
     if (error instanceof FunctionsHttpError) {
@@ -739,6 +747,14 @@ export async function eliminarEquipoDadoDeBaja(
   }
   if (!data?.success) {
     throw new Error('No se recibió confirmación de la eliminación del equipo.')
+  }
+
+  return {
+    limpiezaCompleta: data.limpiezaCompleta !== false,
+    advertencia:
+      typeof data.advertencia === 'string' && data.advertencia.trim()
+        ? data.advertencia
+        : null,
   }
 }
 

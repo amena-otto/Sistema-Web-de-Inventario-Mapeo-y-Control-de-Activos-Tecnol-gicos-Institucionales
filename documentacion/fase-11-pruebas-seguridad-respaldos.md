@@ -90,6 +90,6 @@ Para validar el plan gratuito, registrar semanalmente en Supabase **Settings →
 
 ## CI
 
-El workflow `.github/workflows/ci.yml` instala dependencias con `npm ci`, ejecuta lint, build y `deno check` sobre todas las Edge Functions. Las variables Supabase de compilación son valores ficticios no funcionales; no se guardan secretos de producción en el workflow. Actualmente no hay pruebas unitarias o de navegador configuradas, por lo que el estado de la matriz funcional y RLS requiere evidencia manual de staging.
+El workflow `.github/workflows/ci.yml` instala dependencias con `npm ci`, ejecuta `npm test`, lint, build y `deno check` sobre todas las Edge Functions. Las variables Supabase de compilación son valores ficticios no funcionales; no se guardan secretos de producción en el workflow. Las pruebas automáticas incluyen utilidades de inventario/CSV, los helpers de limpieza por lotes y pruebas de integración SQL con PGlite sobre las migraciones `015` y `016` (idempotencia, triggers, RPC y permisos de la tabla de limpieza diferida). El estado de la matriz funcional, RLS en un proyecto real y la restauración siguen requiriendo evidencia manual de staging.
 
 El informe de cierre con las matrices RB-01…RB-12 y CA-01…CA-16, los hallazgos, el estado de las validaciones y el veredicto técnico está en `documentacion/auditoria-cierre.md`.

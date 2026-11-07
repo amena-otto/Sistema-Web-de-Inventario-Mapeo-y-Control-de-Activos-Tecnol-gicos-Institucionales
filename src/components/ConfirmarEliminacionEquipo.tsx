@@ -1,10 +1,14 @@
 import { useState, type FormEvent } from 'react'
-import { eliminarEquipoDadoDeBaja, type Equipo } from '../services/equiposService'
+import {
+  eliminarEquipoDadoDeBaja,
+  type Equipo,
+  type ResultadoEliminacionEquipo,
+} from '../services/equiposService'
 
 type Props = {
   equipo: Equipo
   onCancelar: () => void
-  onEliminado: (equipo: Equipo) => void
+  onEliminado: (equipo: Equipo, resultado: ResultadoEliminacionEquipo) => void
 }
 
 function mostrarError(error: unknown, fallback: string) {
@@ -39,8 +43,8 @@ export default function ConfirmarEliminacionEquipo({
     setError('')
     setEliminando(true)
     try {
-      await eliminarEquipoDadoDeBaja(equipo.id, codigo)
-      onEliminado(equipo)
+      const resultado = await eliminarEquipoDadoDeBaja(equipo.id, codigo)
+      onEliminado(equipo, resultado)
     } catch (e) {
       setError(mostrarError(e, 'No se pudo eliminar definitivamente el equipo.'))
       setEliminando(false)
