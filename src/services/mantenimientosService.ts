@@ -327,7 +327,7 @@ export async function registrarMantenimiento(datos: NuevoMantenimiento) {
     p_resultado: datos.resultado || null,
     p_observaciones: datos.observaciones || null,
     p_proxima_revision: datos.proximaRevision || null,
-    p_estado: 'pendiente',
+    p_estado: datos.estado,
     p_estado_equipo: datos.estadoEquipo || null,
     p_responsable_id: datos.responsableId || null,
     p_motivo_estado: datos.motivoEstado || null,

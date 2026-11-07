@@ -135,21 +135,24 @@ Deno.serve(async (request: Request) => {
       }
     }
 
-    const driveFotos = (fotografias ?? []).filter((foto) => foto.drive_file_id)
-    for (const foto of driveFotos) {
+    const driveFileIds = (fotografias ?? [])
+      .map((foto) => foto.drive_file_id)
+      .filter((id): id is string => Boolean(id))
+    if (driveFileIds.length) {
       const response = await fetch(`${supabaseUrl}/functions/v1/fotografias-drive`, {
         method: 'DELETE',
         headers: {
           Authorization: `Bearer ${token}`,
           apikey: anonKey,
           'Content-Type': 'application/json',
+          'x-operacion': 'limpiar-equipo',
         },
-        body: JSON.stringify({ fotografiaId: foto.id, equipoId }),
+        body: JSON.stringify({ equipoId, driveFileIds }),
       })
       if (!response.ok) {
-        console.error('No se pudo eliminar una foto de Google Drive:', response.status)
+        console.error('No se pudieron mover a la papelera las fotos de Google Drive:', response.status)
         throw new HttpError(
-          'No se pudieron eliminar todas las fotografías de Google Drive. El equipo continúa dado de baja; vuelve a intentarlo.',
+          'No se pudieron eliminar todas las fotografías de Google Drive. El equipo continúa dado de baja y puede reintentarse; las fotografías que ya se habían procesado no se duplicarán.',
           502,
         )
       }
@@ -166,12 +169,19 @@ Deno.serve(async (request: Request) => {
     if (eliminarError) {
       console.error('No se pudo eliminar el equipo y su historial:', eliminarError.message)
       throw new HttpError(
-        'No se pudo eliminar el equipo y su historial. El registro sigue dado de baja; vuelve a intentarlo.',
+        'No se pudo eliminar el equipo y su historial. El registro sigue dado de baja; vuelve a intentarlo. Los archivos ya procesados se omitirán en el reintento.',
         409,
       )
     }
 
-    return respuesta({ success: true, equipoId }, 200)
+    return respuesta(
+      {
+        success: true,
+        equipoId,
+        fotografias: (fotografias ?? []).length,
+      },
+      200,
+    )
   } catch (error) {
     const message = error instanceof Error
       ? error.message

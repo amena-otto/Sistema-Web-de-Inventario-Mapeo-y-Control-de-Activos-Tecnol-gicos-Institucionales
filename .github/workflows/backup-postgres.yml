@@ -49,6 +49,10 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           BACKUP_ENCRYPTION_PASSPHRASE: ${{ secrets.BACKUP_ENCRYPTION_PASSPHRASE }}
           AWS_DEFAULT_REGION: auto
+          AWS_EC2_METADATA_DISABLED: 'true'
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          PGSSLMODE: require
         run: |
           set -euo pipefail
 
@@ -59,6 +63,33 @@ jobs:
           : "${AWS_SECRET_ACCESS_KEY:?Add R2_SECRET_ACCESS_KEY to GitHub Actions secrets}"
           : "${BACKUP_ENCRYPTION_PASSPHRASE:?Add BACKUP_ENCRYPTION_PASSPHRASE to GitHub Actions secrets}"
 
+          echo "Versiones: $(pg_dump --version), $(gpg --version | head -n 1), $(aws --version 2>&1)"
+          case "$SUPABASE_DB_URL" in
+            postgres://*|postgresql://*) ;;
+            *)
+              echo "SUPABASE_DB_URL debe comenzar con postgres:// o postgresql://" >&2
+              exit 1
+              ;;
+          esac
+
+          # El pooler en modo transacción (puerto 6543) no admite pg_dump.
+          # Se debe usar la conexión directa o el pooler en modo sesión (5432).
+          host_port="$(python3 - "$SUPABASE_DB_URL" <<'PY'
+          import sys
+          from urllib.parse import urlsplit
+          url = urlsplit(sys.argv[1])
+          print(url.hostname or '', url.port or '')
+          PY
+          )"
+          db_host="$(echo "$host_port" | awk '{print $1}')"
+          db_port="$(echo "$host_port" | awk '{print $2}')"
+          echo "Destino PostgreSQL: ${db_host:-desconocido}:${db_port:-predeterminado}"
+          if [ "$db_port" = "6543" ]; then
+            echo "SUPABASE_DB_URL apunta al pooler de transacciones (6543), incompatible con pg_dump." >&2
+            echo "Usa la conexión directa (db.<proyecto>.supabase.co:5432) o el pooler en modo sesión." >&2
+            exit 1
+          fi
+
           workdir="$(mktemp -d "${RUNNER_TEMP}/postgres-backup.XXXXXX")"
           dump="${workdir}/database.dump"
           restore_list="${workdir}/restore-list.txt"
@@ -68,7 +99,17 @@ jobs:
           trap 'rm -f -- "$dump" "$restore_list" "$verified_dump" "$encrypted" "$checksum"; rmdir -- "$workdir"' EXIT
 
           pg_dump --dbname="$SUPABASE_DB_URL" --format=custom --file="$dump"
+          if [ ! -s "$dump" ]; then
+            echo "pg_dump generó un archivo vacío." >&2
+            exit 1
+          fi
           pg_restore --list "$dump" > "$restore_list"
+          for tabla in equipos profiles auditoria movimientos mantenimientos fotografias_equipos; do
+            if ! grep -q "TABLE DATA public ${tabla}\b" "$restore_list"; then
+              echo "El respaldo no contiene la tabla esperada: public.${tabla}" >&2
+              exit 1
+            fi
+          done
           printf '%s' "$BACKUP_ENCRYPTION_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback \
             --passphrase-fd 0 \
             --symmetric --cipher-algo AES256 \
@@ -81,6 +122,41 @@ jobs:
 
           object_key="postgres/$(date -u +%Y/%m/%d)/inventory-$(date -u +%Y%m%dT%H%M%SZ).dump.gpg"
           endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          aws --endpoint-url "$endpoint" s3 cp "$encrypted" "s3://${R2_BUCKET_NAME}/${object_key}" --only-show-errors
-          aws --endpoint-url "$endpoint" s3 cp "$checksum" "s3://${R2_BUCKET_NAME}/${object_key}.sha256" --only-show-errors
-          aws --endpoint-url "$endpoint" s3api head-object --bucket "$R2_BUCKET_NAME" --key "$object_key" > /dev/null
+          aws --endpoint-url "$endpoint" --region auto s3 cp "$encrypted" "s3://${R2_BUCKET_NAME}/${object_key}" --only-show-errors
+          aws --endpoint-url "$endpoint" --region auto s3 cp "$checksum" "s3://${R2_BUCKET_NAME}/${object_key}.sha256" --only-show-errors
+          aws --endpoint-url "$endpoint" --region auto s3api head-object --bucket "$R2_BUCKET_NAME" --key "$object_key" > /dev/null
+          echo "Respaldo cifrado y verificado en R2: ${object_key}"
+
+      - name: Diagnóstico (sin credenciales)
+        if: failure()
+        shell: bash
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          BACKUP_ENCRYPTION_PASSPHRASE: ${{ secrets.BACKUP_ENCRYPTION_PASSPHRASE }}
+        run: |
+          set -u
+          echo "=== Diagnóstico del respaldo (no se muestran secretos) ==="
+          echo "SUPABASE_DB_URL definida: $([ -n "${SUPABASE_DB_URL:-}" ] && echo si || echo NO)"
+          echo "R2_ACCOUNT_ID definido: $([ -n "${R2_ACCOUNT_ID:-}" ] && echo si || echo NO)"
+          echo "R2_BUCKET_NAME definido: $([ -n "${R2_BUCKET_NAME:-}" ] && echo si || echo NO)"
+          echo "R2_ACCESS_KEY_ID definido: $([ -n "${R2_ACCESS_KEY_ID:-}" ] && echo si || echo NO)"
+          echo "R2_SECRET_ACCESS_KEY definido: $([ -n "${R2_SECRET_ACCESS_KEY:-}" ] && echo si || echo NO)"
+          echo "BACKUP_ENCRYPTION_PASSPHRASE definida: $([ -n "${BACKUP_ENCRYPTION_PASSPHRASE:-}" ] && echo si || echo NO)"
+          echo "pg_dump: $(pg_dump --version 2>&1 || echo no disponible)"
+          echo "pg_restore: $(pg_restore --version 2>&1 || echo no disponible)"
+          echo "gpg: $(gpg --version 2>&1 | head -n 1 || echo no disponible)"
+          echo "aws: $(aws --version 2>&1 || echo no disponible)"
+          if [ -n "${SUPABASE_DB_URL:-}" ]; then
+            python3 - "$SUPABASE_DB_URL" <<'PY'
+          import sys
+          from urllib.parse import urlsplit
+          url = urlsplit(sys.argv[1])
+          print(f"esquema={url.scheme} host={url.hostname or 'desconocido'} puerto={url.port or 'predeterminado'} base={url.path.lstrip('/') or 'desconocida'}")
+          print("usuario y contraseña: ocultos")
+          PY
+          fi
+          echo "Revisa también los logs del paso que falló; GitHub no permite leer secretos desde el repositorio."

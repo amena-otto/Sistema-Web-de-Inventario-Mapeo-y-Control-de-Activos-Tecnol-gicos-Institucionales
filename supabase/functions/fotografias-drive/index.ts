@@ -333,7 +333,7 @@ async function descargarArchivoDrive(
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers':
-    'authorization, x-client-info, apikey, content-type',
+    'authorization, x-client-info, apikey, content-type, x-operacion',
   'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
 }
 const rolesLectura = ['admin', 'tecnico', 'consulta']
@@ -702,6 +702,63 @@ async function establecerFotografiaPrincipal(request: Request) {
   return respuestaJson({ success: true })
 }
 
+async function limpiarArchivosEquipo(request: Request) {
+  const { adminClient } = await validarPerfil(request, ['admin'])
+  let body: unknown
+  try {
+    body = await request.json()
+  } catch {
+    return respuestaJson({ error: 'La solicitud de limpieza no es válida.' }, 400)
+  }
+  if (
+    typeof body !== 'object' ||
+    body === null ||
+    !('equipoId' in body) ||
+    typeof body.equipoId !== 'string' ||
+    !uuidPattern.test(body.equipoId) ||
+    !('driveFileIds' in body) ||
+    !Array.isArray(body.driveFileIds) ||
+    body.driveFileIds.length > 100 ||
+    body.driveFileIds.some(
+      (id) => typeof id !== 'string' || id.length < 10 || id.length > 200,
+    )
+  ) {
+    return respuestaJson({ error: 'Los identificadores de limpieza no son válidos.' }, 400)
+  }
+  if (body.driveFileIds.length === 0) {
+    return respuestaJson({ success: true, eliminadas: 0 })
+  }
+
+  // Solo se permiten archivos que pertenecen realmente al equipo indicado.
+  const { data: fotografias, error } = await adminClient
+    .from('fotografias_equipos')
+    .select('drive_file_id')
+    .eq('equipo_id', body.equipoId)
+  if (error) {
+    console.error('No se pudieron verificar los archivos del equipo:', error.message)
+    throw new Error('No se pudieron verificar las fotografías del equipo.')
+  }
+  const permitidos = new Set(
+    (fotografias ?? [])
+      .map((foto) => foto.drive_file_id)
+      .filter((id): id is string => Boolean(id)),
+  )
+  if (body.driveFileIds.some((id: string) => !permitidos.has(id))) {
+    return respuestaJson(
+      { error: 'Uno de los archivos no pertenece al equipo indicado.' },
+      400,
+    )
+  }
+
+  const accessToken = await getGoogleAccessToken(adminClient)
+  for (const fileId of body.driveFileIds) {
+    await marcarArchivoDrive(accessToken, fileId, true)
+  }
+  // No se borran los registros aquí: la función de base de datos los elimina
+  // dentro de su transacción y conserva el conteo real de fotografías.
+  return respuestaJson({ success: true, eliminadas: body.driveFileIds.length })
+}
+
 async function eliminarFotografia(request: Request) {
   const { adminClient } = await validarPerfil(request, rolesSubida)
   let body: unknown
@@ -899,7 +956,12 @@ Deno.serve(async (request: Request) => {
 
   try {
     if (request.method === 'PATCH') return await establecerFotografiaPrincipal(request)
-    if (request.method === 'DELETE') return await eliminarFotografia(request)
+    if (request.method === 'DELETE') {
+      if (request.headers.get('x-operacion') === 'limpiar-equipo') {
+        return await limpiarArchivosEquipo(request)
+      }
+      return await eliminarFotografia(request)
+    }
     if (request.method === 'POST') return await subirFotografia(request)
     if (request.method === 'GET') return await obtenerFotografia(request)
     return respuestaJson({ error: 'Método no permitido.' }, 405)

@@ -1,11 +1,12 @@
-import { prepararCsvInventario, valoresFilaCsv, leerArchivoCsv, fechaCsvAISO } from '../utils/csvInventario'
-import { prepararFilaImportacion, columnasImportacion } from '../utils/inventario'
+import { prepararCsvInventario, leerArchivoCsv, analizarImportacionCsv, identificadoresCsv, type AnalisisImportacionCsv, type FilaImportacionCsv } from '../utils/csvInventario'
+import { columnasImportacion } from '../utils/inventario'
 import { useEffect, useMemo, useState } from 'react'
 import { usePermissions } from '../hooks/usePermissions'
 import {
   cargarCatalogos,
   estadosOperativos,
   importarFila,
+  buscarEquiposPorIdentificadores,
   listarEquiposParaExportar,
   type Ambiente,
   type Categoria,
@@ -301,6 +302,7 @@ export default function Reportes() {
   const [generando, setGenerando] = useState(false)
   const [importando, setImportando] = useState(false)
   const [resultadoImportacion, setResultadoImportacion] = useState<string[]>([])
+  const [analisisImportacion, setAnalisisImportacion] = useState<AnalisisImportacionCsv | null>(null)
   const [error, setError] = useState('')
   const [aviso, setAviso] = useState('')
   const [filas, setFilas] = useState<FilaReporte[]>([])
@@ -456,13 +458,12 @@ export default function Reportes() {
     window.setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 
-  async function importarCsv(archivo: File) {
-    if (!puedeImportarEquipos) return
-    setImportando(true)
+  async function seleccionarCsv(archivo: File) {
+    if (!puedeImportarEquipos || importando) return
     setError('')
     setAviso('')
     setResultadoImportacion([])
-    const resultados: string[] = []
+    setAnalisisImportacion(null)
 
     try {
       if (archivo.size > 2 * 1024 * 1024) {
@@ -474,54 +475,94 @@ export default function Reportes() {
       setCategorias(catalogos.categorias)
       setAmbientes(catalogos.ambientes)
 
-      for (const fila of filasCsv) {
-        const numeroFila = fila.numeroLinea
+      const identificadores = identificadoresCsv(cabeceras, filasCsv)
+      const existentes = await buscarEquiposPorIdentificadores(
+        identificadores.series,
+        identificadores.patrimonios,
+      )
+      const analisis = analizarImportacionCsv(
+        { cabeceras, filas: filasCsv },
+        catalogos,
+        existentes,
+      )
+      setAnalisisImportacion(analisis)
+      setAviso(
+        `Vista previa lista: ${analisis.validas} fila(s) válida(s) y ${analisis.invalidas} con errores. Revisa el detalle antes de importar.`,
+      )
+      if (!analisis.validas) {
+        setError('Ninguna fila puede importarse. Corrige el archivo y vuelve a seleccionarlo.')
+      }
+    } catch (causa) {
+      setError(mostrarError(causa, 'No se pudo procesar el archivo CSV.'))
+    }
+  }
+
+  function datosDesdeFila(fila: FilaImportacionCsv): DatosEquipo {
+    if (!fila.preparada) {
+      throw new Error('La fila no tiene una categoría y una ubicación válidas.')
+    }
+    return {
+      ...datosEquipoVacios,
+      categoria_id: fila.preparada.categoria_id,
+      ambiente_id: fila.preparada.ambiente_id,
+      nombre: fila.valores.nombre.trim(),
+      marca: fila.valores.marca || null,
+      modelo: fila.valores.modelo || null,
+      numero_serie: fila.valores.numero_serie || null,
+      codigo_patrimonial: fila.valores.codigo_patrimonial || null,
+      posicion: fila.valores.posicion || null,
+      estado_operativo: fila.preparada.estado_operativo as DatosEquipo['estado_operativo'],
+      fecha_adquisicion: fila.fechaAdquisicion,
+      fecha_garantia: fila.fechaGarantia,
+      observaciones: fila.valores.observaciones || null,
+    }
+  }
+
+  async function confirmarImportacion() {
+    if (!analisisImportacion || importando) return
+    const filasValidas = analisisImportacion.filas.filter((fila) => !fila.errores.length)
+    if (!filasValidas.length) return
+
+    setImportando(true)
+    setError('')
+    setAviso('')
+    setResultadoImportacion([])
+    const resultados: string[] = []
+    let exitosas = 0
+
+    try {
+      for (const fila of filasValidas) {
         try {
-          const valores = valoresFilaCsv(fila, cabeceras)
-          const preparada = prepararFilaImportacion(valores, catalogos)
-          await importarFila(
-            {
-              ...datosEquipoVacios,
-              categoria_id: preparada.categoria_id,
-              ambiente_id: preparada.ambiente_id,
-              nombre: valores.nombre.trim(),
-              marca: valores.marca || null,
-              modelo: valores.modelo || null,
-              numero_serie: valores.numero_serie || null,
-              codigo_patrimonial: valores.codigo_patrimonial || null,
-              posicion: valores.posicion || null,
-              estado_operativo: preparada.estado_operativo,
-              fecha_adquisicion: fechaCsvAISO(valores.fecha_adquisicion),
-              fecha_garantia: fechaCsvAISO(valores.fecha_garantia),
-              observaciones: valores.observaciones || null,
-            },
-            valores.numero_serie,
-            {
-              Procesador: valores.procesador ?? '',
-              'Memoria RAM': valores.memoria_ram ?? '',
-              Almacenamiento: valores.almacenamiento ?? '',
-              'Sistema operativo': valores.sistema_operativo ?? '',
-            },
-          )
-          resultados.push(`Fila ${numeroFila}: importada.`)
+          const datos = datosDesdeFila(fila)
+          await importarFila(datos, fila.valores.numero_serie)
+          exitosas += 1
+          resultados.push(`Fila ${fila.numeroLinea}: importada.`)
         } catch (causa) {
-          resultados.push(`Fila ${numeroFila}: ${mostrarError(causa, 'no se pudo importar')}`)
+          resultados.push(`Fila ${fila.numeroLinea}: ${mostrarError(causa, 'no se pudo importar')}`)
         }
       }
 
+      for (const fila of analisisImportacion.filas.filter((item) => item.errores.length)) {
+        resultados.push(`Fila ${fila.numeroLinea}: no se importó: ${fila.errores.join(' ')}`)
+      }
+
+      const rechazadas = filasValidas.length - exitosas + analisisImportacion.invalidas
       setResultadoImportacion(resultados)
-      const exitosas = resultados.filter((item) => item.endsWith('importada.')).length
-      setAviso(`Importación finalizada: ${exitosas} importadas y ${resultados.length - exitosas} rechazadas.`)
-      if (exitosas !== resultados.length) {
+      setAviso(
+        `Importación finalizada: ${exitosas} importadas y ${rechazadas} rechazadas.` +
+          (analisisImportacion.invalidas
+            ? ` ${analisisImportacion.invalidas} fila(s) no se intentaron porque la vista previa detectó errores.`
+            : ''),
+      )
+      if (rechazadas > 0) {
         setError('Algunas filas no se importaron; revisa el resultado para ver el motivo de cada una.')
       }
+      setAnalisisImportacion(null)
       if (exitosas > 0) {
         setFilas([])
         setColumnas([])
         setFechaGeneracion('')
       }
-    } catch (causa) {
-      setError(mostrarError(causa, 'No se pudo procesar el archivo CSV.'))
     } finally {
       setImportando(false)
     }
@@ -780,9 +821,10 @@ export default function Reportes() {
         <div>
           <h2 className="font-semibold text-slate-900">Importación masiva de equipos</h2>
           <p className="mt-1 text-sm text-slate-600">
-            Descarga la plantilla CSV o importa equipos desde un archivo. Se verifican categorías,
-            ambientes, fechas, estados y posibles duplicados antes de agregar cada registro.
-            Si una plantilla antigua incluye características técnicas, agrega esas características desde la ficha después de importar; las filas que las contengan serán rechazadas sin crear el equipo.
+            Descarga la plantilla CSV o selecciona un archivo para revisarlo antes de importar.
+            La vista previa verifica categorías, ambientes, fechas, estados, series y códigos
+            patrimoniales duplicados, tanto en el archivo como en el inventario actual.
+            Si una plantilla antigua incluye características técnicas, agrega esas características desde la ficha después de importar; las filas que las contengan se marcarán como inválidas sin crear el equipo.
           </p>
         </div>
         <div className="mt-4 flex flex-wrap gap-3">
@@ -796,7 +838,7 @@ export default function Reportes() {
           </button>
           {puedeImportarEquipos && (
             <label className={`inline-flex min-h-10 items-center rounded-lg bg-orange-600 px-4 py-2 text-sm font-semibold text-white transition ${importando ? 'cursor-wait opacity-60' : 'cursor-pointer hover:bg-orange-700'}`}>
-              {importando ? 'Importando equipos…' : 'Importar equipos CSV'}
+              {importando ? 'Importando equipos…' : 'Seleccionar CSV para revisar'}
               <input
                 type="file"
                 accept=".csv,text/csv"
@@ -804,13 +846,76 @@ export default function Reportes() {
                 className="sr-only"
                 onChange={(event) => {
                   const archivo = event.target.files?.[0]
-                  if (archivo) void importarCsv(archivo)
+                  if (archivo) void seleccionarCsv(archivo)
                   event.currentTarget.value = ''
                 }}
               />
             </label>
           )}
         </div>
+        {analisisImportacion && (
+          <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm text-slate-800">
+                Vista previa: <strong>{analisisImportacion.validas}</strong> fila(s) válida(s) y{' '}
+                <strong>{analisisImportacion.invalidas}</strong> con errores.
+              </p>
+              <button
+                type="button"
+                onClick={() => void confirmarImportacion()}
+                disabled={importando || analisisImportacion.validas === 0}
+                className="min-h-10 rounded-lg bg-orange-700 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-800 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {importando
+                  ? 'Importando…'
+                  : `Importar ${analisisImportacion.validas} fila(s) válida(s)`}
+              </button>
+            </div>
+            {analisisImportacion.invalidas > 0 && (
+              <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-sm text-amber-900">
+                Las filas con errores no se importarán. Corrige el archivo y vuelve a seleccionarlo
+                para incluirlas.
+              </p>
+            )}
+            <div className="mt-3 max-h-64 overflow-auto rounded-lg border border-slate-200 bg-white">
+              <table className="w-full min-w-[640px] text-left text-sm">
+                <thead className="bg-slate-100 text-xs uppercase text-slate-500">
+                  <tr>
+                    <th className="whitespace-nowrap px-3 py-2">Fila</th>
+                    <th className="whitespace-nowrap px-3 py-2">Equipo</th>
+                    <th className="whitespace-nowrap px-3 py-2">Estado</th>
+                    <th className="px-3 py-2">Detalle</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {analisisImportacion.filas.map((fila) => (
+                    <tr key={fila.numeroLinea} className={fila.errores.length ? 'bg-red-50/50' : ''}>
+                      <td className="whitespace-nowrap px-3 py-2 text-slate-600">{fila.numeroLinea}</td>
+                      <td className="px-3 py-2 text-slate-800">
+                        {fila.valores.nombre?.trim() || '—'}
+                        {fila.valores.numero_serie?.trim() && (
+                          <span className="block text-xs text-slate-500">
+                            Serie {fila.valores.numero_serie.trim()}
+                          </span>
+                        )}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2">
+                        {fila.errores.length ? (
+                          <span className="font-medium text-red-700">Con errores</span>
+                        ) : (
+                          <span className="font-medium text-emerald-700">Válida</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-slate-700">
+                        {fila.errores.length ? fila.errores.join(' ') : 'Lista para importar.'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
         {resultadoImportacion.length > 0 && (
           <details className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
             <summary className="cursor-pointer text-sm font-medium text-slate-800">

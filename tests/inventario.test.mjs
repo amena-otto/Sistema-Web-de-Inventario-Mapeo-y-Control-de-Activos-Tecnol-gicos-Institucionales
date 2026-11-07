@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { validarEquipo, prepararFilaImportacion, ejecutarImportacion, columnasImportacion } from '../src/utils/inventario.ts'
-import { analizarCsv, normalizarCabeceraCsv, leerArchivoCsv, fechaCsvAISO, prepararCsvInventario, valoresFilaCsv } from '../src/utils/csvInventario.ts'
+import { validarEquipo, prepararFilaImportacion, ejecutarImportacion, columnasImportacion, terminosBusqueda } from '../src/utils/inventario.ts'
+import { analizarCsv, normalizarCabeceraCsv, leerArchivoCsv, fechaCsvAISO, prepararCsvInventario, valoresFilaCsv, analizarImportacionCsv, identificadoresCsv } from '../src/utils/csvInventario.ts'
 
 const catalogos = {
   categorias: [{ id: 'cat', nombre: 'Cómputo' }],
@@ -142,5 +142,61 @@ test('proceso CSV completo conserva columnas antiguas seguras y rechaza filas si
 test('columnas de más se rechazan y las faltantes quedan vacías para validación', () => {
   assert.throws(() => valoresFilaCsv(['a', 'b', 'c'], ['nombre', 'numero_serie']), /3 columnas/)
   assert.deepEqual(valoresFilaCsv(['a'], ['nombre', 'numero_serie']), { nombre: 'a', numero_serie: '' })
+})
+
+test('la vista previa de importación cuenta filas válidas sin escribir datos', () => {
+  const csv = `${columnasImportacion.join(',')}\nPC,001,Computo,A101,operativo\nPC,002,Computo,A101,operativo`
+  const { cabeceras, filas } = prepararCsvInventario(csv)
+  const analisis = analizarImportacionCsv({ cabeceras, filas }, catalogos)
+  assert.equal(analisis.validas, 2)
+  assert.equal(analisis.invalidas, 0)
+  assert.deepEqual(analisis.filas.map((fila) => fila.numeroLinea), [2, 3])
+  assert.deepEqual(analisis.filas.map((fila) => fila.preparada?.categoria_id), ['cat', 'cat'])
+})
+
+test('la vista previa detecta series y patrimonios repetidos dentro del CSV y en el inventario', () => {
+  const csv = `${columnasImportacion.join(',')},codigo_patrimonial\nPC,001,Computo,A101,operativo,PAT-1\nPC,001,Computo,A101,operativo,\nPC,003,Computo,A101,operativo,PAT-1\nPC,004,Computo,A101,operativo,`
+  const { cabeceras, filas } = prepararCsvInventario(csv)
+  const analisis = analizarImportacionCsv(
+    { cabeceras, filas },
+    catalogos,
+    [{ codigo_institucional: 'OT-EQP-000004', numero_serie: '004', codigo_patrimonial: null }],
+  )
+  assert.equal(analisis.validas, 1)
+  assert.match(analisis.filas[1].errores.join(' '), /serie repetido en el CSV.*fila 2/)
+  assert.match(analisis.filas[2].errores.join(' '), /patrimonial repetido en el CSV.*fila 2/)
+  assert.match(analisis.filas[3].errores.join(' '), /Ya existe el equipo OT-EQP-000004/)
+})
+
+test('la vista previa valida fechas, orden de garantía y características técnicas', () => {
+  const csv = `${columnasImportacion.join(',')},codigo_patrimonial,fecha_adquisicion,fecha_garantia,procesador
+PC,010,Computo,A101,operativo,PAT-10,2025-01-10,2025-01-01,
+PC,011,Computo,A101,operativo,,,31/02/2025,
+PC,012,Computo,A101,operativo,,,,Intel
+PC,013,NoExiste,A101,operativo,,,,
+PC,014,Computo,A101,operativo,,2025-01-10,2025-01-10,`
+  const { cabeceras, filas } = prepararCsvInventario(csv)
+  const analisis = analizarImportacionCsv({ cabeceras, filas }, catalogos)
+  assert.match(analisis.filas[0].errores.join(' '), /garantía no puede ser anterior/)
+  assert.match(analisis.filas[1].errores.join(' '), /fecha de garantía no es válida/)
+  assert.match(analisis.filas[2].errores.join(' '), /características técnicas.*Procesador/)
+  assert.match(analisis.filas[3].errores.join(' '), /Categoría inexistente/)
+  assert.equal(analisis.filas[4].errores.length, 0)
+  assert.equal(analisis.validas, 1)
+})
+
+test('recopila solo los identificadores usados por el CSV para la consulta previa', () => {
+  const csv = `${columnasImportacion.join(',')},codigo_patrimonial\nPC,001,Computo,A101,operativo,PAT-1\nPC,001,Computo,A101,operativo,\nPC,002,Computo,A101,operativo,PAT-2`
+  const { cabeceras, filas } = prepararCsvInventario(csv)
+  assert.deepEqual(identificadoresCsv(cabeceras, filas), {
+    series: ['001', '002'],
+    patrimonios: ['PAT-1', 'PAT-2'],
+  })
+})
+
+test('la búsqueda compartida divide términos y descarta caracteres de filtros', () => {
+  assert.deepEqual(terminosBusqueda('  Lenovo, ThinkPad;  T14  '), ['Lenovo', 'ThinkPad', 'T14'])
+  assert.deepEqual(terminosBusqueda('   '), [])
+  assert.deepEqual(terminosBusqueda('a b c d e f g h'), ['a', 'b', 'c', 'd', 'e', 'f'])
 })
 
