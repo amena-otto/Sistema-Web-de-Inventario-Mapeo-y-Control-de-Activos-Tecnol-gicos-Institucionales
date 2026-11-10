@@ -9,3 +9,19 @@ entrypoint = "./functions/enviar-correo/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/enviar-correo/*.html" ]
+
+[api]
+port = 55321
+
+[db]
+port = 55322
+shadow_port = 55320
+
+[studio]
+port = 55323
+
+[inbucket]
+port = 55324
+
+[analytics]
+port = 55327
