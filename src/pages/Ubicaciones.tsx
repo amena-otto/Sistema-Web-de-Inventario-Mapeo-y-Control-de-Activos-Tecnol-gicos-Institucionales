@@ -1,3 +1,4 @@
+import EquiposCompartidosArea from '../components/EquiposCompartidosArea'
 import IconoInventario from '../components/IconoInventario'
 import { esOficina, nombreUbicacion, sugerirIcono, iconosUbicacion, iconoCategoria } from '../utils/ubicaciones'
 import { filtrarEquiposUbicacion, etiquetasEstadoUbicacion as etiquetaEstado } from '../utils/busquedaEquiposUbicacion'
@@ -490,7 +491,7 @@ export default function Ubicaciones() {
           <section ref={listadoRef} className="mt-5 min-w-0 scroll-mt-24 rounded-xl bg-white shadow">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b p-4">
               <div>
-                <h3 className="font-semibold">{ambienteElegido ? 'Equipos del ambiente' : 'Equipos del piso'}</h3>
+                <h3 className="font-semibold">{ambienteElegido ? 'Equipos físicamente en el ambiente' : seccion === 'areas' ? 'Equipos físicamente en áreas académicas' : 'Equipos del piso'}</h3>
                 <p className="text-xs text-slate-500">La ubicación se obtiene de la relación del equipo con su ambiente.</p>
               </div>
             </div>
@@ -557,7 +558,7 @@ export default function Ubicaciones() {
                         </div>
                         <p className="break-all text-xs text-slate-700"><span className="font-semibold">Serie:</span> {equipo.numero_serie ?? 'Sin serie'}</p>
                         <p className="break-words text-xs text-slate-500">{equipo.marca ?? 'Sin marca'} · {equipo.modelo ?? 'Sin modelo'}</p>
-                        <p className="break-words text-xs text-slate-600">{ambiente ? `${ambiente.codigo} — ${ambiente.nombre}` : 'Sin ambiente'}</p>
+                        <p className="break-words text-xs text-slate-600">{ambiente ? esArea(ambiente) ? ambiente.nombre : [ambiente.codigo, ambiente.nombre].filter(Boolean).join(' — ') : 'Sin ambiente'}</p>
                         <button type="button" onClick={() => setFicha(equipo)} className="min-h-10 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-blue-800 hover:bg-slate-50">Ver equipo</button>
                       </article>
                     )
@@ -619,6 +620,8 @@ export default function Ubicaciones() {
           </section>
         </>
       )}
+
+      {ambienteElegido && ambientes.some((a) => a.id === ambienteElegido && esArea(a)) && <EquiposCompartidosArea key={ambienteElegido} ambienteId={ambienteElegido} ambientes={ambientes} />}
 
       {formulario && (
         <div className="fixed inset-0 z-40 flex items-center justify-center overflow-y-auto bg-slate-950/50 p-4">

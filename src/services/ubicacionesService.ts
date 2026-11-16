@@ -145,6 +145,11 @@ export async function eliminarAmbiente(id: string) {
     throw new Error('No se puede eliminar: primero reasigna los equipos de este ambiente.')
   }
 
+  const { count: compartidos, error: errorCompartidos } = await supabase
+    .from('equipo_areas_usuarias').select('id', { count: 'exact', head: true }).eq('ambiente_id', id)
+  if (errorCompartidos && !['42P01', 'PGRST205'].includes(errorCompartidos.code)) throw errorCompartidos
+  if (compartidos) throw new Error('Esta área utiliza equipos compartidos. Retira sus vínculos desde la ficha de esos equipos o desactiva el área para conservarlos.')
+
   const { error } = await supabase.from('ambientes').delete().eq('id', id)
   if (error) throw error
 }

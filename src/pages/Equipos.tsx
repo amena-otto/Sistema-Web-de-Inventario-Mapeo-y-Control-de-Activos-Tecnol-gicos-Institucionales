@@ -1,3 +1,5 @@
+import { listarUsoEquipos, mensajeCompartidos } from '../services/equiposCompartidosService'
+import AreasUsuariasEquipo from '../components/AreasUsuariasEquipo'
 import { nombreUbicacion, iconoCategoria } from '../utils/ubicaciones'
 import IconoInventario from '../components/IconoInventario'
 import { validarEquipo } from '../utils/inventario'
@@ -180,6 +182,10 @@ export default function Equipos() {
   const [datos, setDatos] = useState<DatosEquipo>(vacio)
   const [tecnicas, setTecnicas] = useState<Record<string, string>>({})
   const [duplicados, setDuplicados] = useState<Equipo[]>([])
+  const [vistaEquipos, setVistaEquipos] = useState<'tabla' | 'tarjetas'>('tabla')
+  const [areasPorEquipo, setAreasPorEquipo] = useState<Record<string, string[]>>({})
+  const [errorUsoCompartido, setErrorUsoCompartido] = useState('')
+  const [pestanaDetalle, setPestanaDetalle] = useState('general')
   const [equipoDetalle, setEquipoDetalle] = useState<Equipo | null>(null)
   const [equipoQr, setEquipoQr] = useState<Equipo | null>(null)
   const [seleccionQr, setSeleccionQr] = useState<Map<string, Equipo>>(() => new Map())
@@ -561,6 +567,21 @@ export default function Equipos() {
     setFotoAdicional([...fotoAdicional, ...nuevas.map(crearVistaArchivo)])
   }
 
+  useEffect(() => {
+    let vigente = true
+    listarUsoEquipos(equipos.map((e) => e.id)).then((uso) => {
+      if (vigente) { setAreasPorEquipo(uso); setErrorUsoCompartido('') }
+    }).catch((e: unknown) => {
+      if (vigente) { setAreasPorEquipo({}); setErrorUsoCompartido(mensajeCompartidos(e)) }
+    })
+    return () => { vigente = false }
+  }, [equipos])
+
+  function compartido(equipo: Equipo) {
+    const areas = areasPorEquipo[equipo.id] ?? []
+    return areas.length > 1 || areas.some((id) => id !== equipo.ambiente_id)
+  }
+
   function iniciarNuevo() {
     solicitudEdicion.current += 1
     equipoEdicionIdActual.current = null
@@ -883,6 +904,7 @@ export default function Equipos() {
 
   const abrirDetalle = useCallback(async (equipo: Equipo) => {
     const solicitudActual = ++solicitudDetalle.current
+    if (equipoDetalleIdActual.current !== equipo.id) setPestanaDetalle('general')
     equipoDetalleIdActual.current = equipo.id
     setEquipoDetalle(equipo)
     setDetalleCargando(true)
@@ -1186,7 +1208,7 @@ export default function Equipos() {
             <button
               type="button"
               onClick={iniciarNuevo}
-              className="rounded-lg bg-orange-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500"
+              className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
             >
               Nuevo equipo
             </button>
@@ -1194,6 +1216,7 @@ export default function Equipos() {
         </div>
       </div>
 
+      {errorUsoCompartido && <p role="status" className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{errorUsoCompartido} El listado físico sigue disponible.</p>}
       {puedeDarDeBaja && verEquiposDadosDeBaja && <LimpiezasPendientes />}
       {error && (
         <p role="alert" className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">
@@ -1215,9 +1238,9 @@ export default function Equipos() {
           type="button"
           aria-pressed={!verEquiposDadosDeBaja}
           onClick={() => seleccionarVistaEquipos(false)}
-          className={`min-h-11 rounded-lg px-4 py-2 text-sm font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500 ${
+          className={`min-h-11 rounded-lg px-4 py-2 text-sm font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 ${
             !verEquiposDadosDeBaja
-              ? 'bg-orange-700 text-white shadow-sm'
+              ? 'bg-blue-700 text-white shadow-sm'
               : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
           }`}
         >
@@ -1227,9 +1250,9 @@ export default function Equipos() {
           type="button"
           aria-pressed={verEquiposDadosDeBaja}
           onClick={() => seleccionarVistaEquipos(true)}
-          className={`min-h-11 rounded-lg px-4 py-2 text-sm font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500 ${
+          className={`min-h-11 rounded-lg px-4 py-2 text-sm font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 ${
             verEquiposDadosDeBaja
-              ? 'bg-orange-700 text-white shadow-sm'
+              ? 'bg-blue-700 text-white shadow-sm'
               : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
           }`}
         >
@@ -1300,8 +1323,15 @@ export default function Equipos() {
         </select>
       </div>
 
+      {(busqueda || categoriaFiltro || ambienteFiltro || estado) && <div aria-label="Filtros aplicados" className="mt-3 flex flex-wrap items-center gap-2 text-sm"><span className="text-slate-500">Filtros:</span>{[
+        { valor: busqueda, texto: `Búsqueda: ${busqueda}`, quitar: () => setBusqueda('') },
+        { valor: categoriaFiltro, texto: `Categoría: ${categoriasPorId.get(categoriaFiltro) ?? categoriaFiltro}`, quitar: () => setCategoriaFiltro('') },
+        { valor: ambienteFiltro, texto: `Ubicación: ${ambientesPorId.get(ambienteFiltro)?.nombre ?? ambienteFiltro}`, quitar: () => setAmbienteFiltro('') },
+        { valor: estado, texto: `Estado: ${etiquetasEstado[estado] ?? estado}`, quitar: () => setEstado('') },
+      ].filter((f) => f.valor).map((f) => <button key={f.texto} type="button" aria-label={`Quitar ${f.texto}`} onClick={() => { f.quitar(); setPagina(1) }} className="inline-flex min-h-9 items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-blue-900">{f.texto}<span aria-hidden="true">×</span></button>)}<button type="button" onClick={limpiarFiltros} className="min-h-9 px-2 font-semibold text-slate-600 underline">Limpiar todo</button></div>}
+
       {(ambienteFiltrosIds.length > 0 || sinUbicacionFiltro) && (
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-900">
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
           <span>
             {sinUbicacionFiltro
               ? 'Equipos sin ubicación asignada'
@@ -1314,13 +1344,14 @@ export default function Equipos() {
               setSinUbicacionFiltro(false)
               setPagina(1)
             }}
-            className="font-semibold text-orange-800 hover:underline"
+            className="font-semibold text-blue-800 hover:underline"
           >
             Quitar filtro
           </button>
         </div>
       )}
 
+      <div role="group" aria-label="Presentación de equipos" className="mt-4 hidden justify-end gap-1 lg:flex">{(['tabla','tarjetas'] as const).map((vista) => <button key={vista} type="button" aria-pressed={vistaEquipos === vista} onClick={() => setVistaEquipos(vista)} className={`min-h-10 rounded-lg border px-4 py-2 text-sm font-semibold ${vistaEquipos === vista ? 'border-blue-300 bg-blue-50 text-blue-800' : 'border-slate-200 bg-white text-slate-600'}`}>{vista === 'tabla' ? 'Tabla' : 'Tarjetas'}</button>)}</div>
       <div ref={listadoRef} className="mt-4 min-w-0 scroll-mt-24 overflow-hidden rounded-xl bg-white shadow" aria-busy={cargando}>
         <div className="flex flex-col items-stretch justify-between gap-3 border-b border-slate-100 px-3 py-3 sm:flex-row sm:items-center sm:px-4">
           <h2 className="min-w-0 font-semibold text-slate-800">
@@ -1336,7 +1367,7 @@ export default function Equipos() {
                 setOrden(valor)
                 setPagina(1)
               }}
-              className="min-h-10 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500"
+              className="min-h-10 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
             >
               {ordenesEquipos.map((opcion) => (
                 <option key={opcion.valor} value={opcion.valor}>{opcion.etiqueta}</option>
@@ -1403,12 +1434,12 @@ export default function Equipos() {
             }
           />
         )}
-        <div className="divide-y divide-slate-100 lg:hidden">
+        <div className={vistaEquipos === 'tarjetas' ? 'grid gap-3 p-3 md:grid-cols-2 xl:grid-cols-3' : 'divide-y divide-slate-100 lg:hidden'}>
           {equipos.map((equipo) => {
             const ambiente = equipo.ambiente_id ? ambientesPorId.get(equipo.ambiente_id) : null
             const deBaja = equipo.situacion !== 'activo'
             return (
-              <article key={equipo.id} className="min-w-0 space-y-3 p-4">
+              <article key={equipo.id} className={`min-w-0 space-y-3 p-4 ${vistaEquipos === 'tarjetas' ? 'rounded-xl border border-slate-200 bg-white shadow-sm' : ''}`}>
                 <div className="flex items-start justify-between gap-3">
                   <label className="flex min-h-9 items-center gap-2 text-xs font-medium text-slate-600">
                     <input
@@ -1423,7 +1454,7 @@ export default function Equipos() {
                 </div>
                 <div className="min-w-0">
                   <p className="break-all text-sm font-bold text-blue-800">{equipo.codigo_institucional}</p>
-                  <h3 className="mt-0.5 break-words text-base font-semibold text-slate-900">{equipo.nombre}</h3>
+                  <h3 className="mt-0.5 break-words text-base font-semibold text-slate-900">{equipo.nombre}</h3>{compartido(equipo) && <span className="mt-1 inline-flex rounded-full bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-800">Compartido</span>}
                   <p className="mt-1 break-all text-sm text-slate-700">
                     <span className="font-semibold">Serie:</span> {equipo.numero_serie ?? 'Sin serie'}
                   </p>
@@ -1452,7 +1483,7 @@ export default function Equipos() {
                   )}
                 </dl>
                 <div className="grid grid-cols-2 gap-2 min-[420px]:grid-cols-3">
-                  <button type="button" onClick={() => setEquipoQr(equipo)} className="min-h-10 rounded-lg border border-orange-200 px-3 py-2 text-sm font-semibold text-orange-700 hover:bg-orange-50">QR</button>
+                  <button type="button" onClick={() => setEquipoQr(equipo)} className="min-h-10 rounded-lg border border-blue-200 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50">QR</button>
                   <button type="button" onClick={() => void abrirDetalle(equipo)} className="min-h-10 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Detalle</button>
                   {puedeEditar && !deBaja && (
                     <button type="button" onClick={() => void iniciarEdicion(equipo)} className="min-h-10 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Editar</button>
@@ -1468,7 +1499,7 @@ export default function Equipos() {
             )
           })}
         </div>
-        <div className="hidden lg:block">
+        <div className={vistaEquipos === 'tarjetas' ? 'hidden' : 'hidden lg:block'}>
           <table className="w-full table-fixed text-left text-sm">
             <colgroup>
               <col className="w-12" />
@@ -1503,7 +1534,7 @@ export default function Equipos() {
                     </td>
                     <td className="min-w-0 px-3 py-4">
                       <p className="break-all font-semibold text-blue-800">{equipo.codigo_institucional}</p>
-                      <p className="mt-0.5 break-words font-medium text-slate-900">{equipo.nombre}</p>
+                      <p className="mt-0.5 break-words font-medium text-slate-900">{equipo.nombre}</p>{compartido(equipo) && <span className="mt-1 inline-flex rounded-full bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-800">Compartido</span>}
                       <p className="mt-1 break-all text-xs text-slate-700">
                         <span className="font-semibold">Serie:</span> {equipo.numero_serie ?? 'Sin serie'}
                       </p>
@@ -1527,7 +1558,7 @@ export default function Equipos() {
                     </td>
                     <td className="px-3 py-4">
                       <div className="flex flex-wrap gap-1.5">
-                        <button type="button" onClick={() => setEquipoQr(equipo)} className="min-h-9 rounded-lg border border-orange-200 px-3 py-1.5 text-sm font-semibold text-orange-700 hover:bg-orange-50">QR</button>
+                        <button type="button" onClick={() => setEquipoQr(equipo)} className="min-h-9 rounded-lg border border-blue-200 px-3 py-1.5 text-sm font-semibold text-blue-700 hover:bg-blue-50">QR</button>
                         <button type="button" onClick={() => void abrirDetalle(equipo)} className="min-h-9 rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50">Detalle</button>
                         {puedeEditar && !deBaja && (
                           <button type="button" onClick={() => void iniciarEdicion(equipo)} className="min-h-9 rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50">Editar</button>
@@ -1641,7 +1672,7 @@ export default function Equipos() {
                   type="submit"
                   form="formulario-equipo"
                   disabled={guardando || cargandoDatosEdicion || Boolean(errorDatosEdicion) || !categorias.length}
-                  className="min-h-10 rounded-lg bg-orange-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-800 disabled:opacity-60"
+                  className="min-h-10 rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-800 disabled:opacity-60"
                 >
                   {guardando ? 'Guardando...' : editando ? 'Guardar cambios' : 'Guardar equipo'}
                 </button>
@@ -1667,6 +1698,7 @@ export default function Equipos() {
                 No hay categorías activas. Un administrador debe crearlas en la gestión de categorías antes de registrar equipos.
               </p>
             )}
+            <p className="mt-3 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-900">La ubicación indica dónde está físicamente. Después de guardar, abre su ficha → Áreas usuarias para configurar el uso compartido.</p>
             <form noValidate id="formulario-equipo" onSubmit={(event) => void guardarEquipo(event)} className="mt-4 space-y-5">
               <fieldset disabled={guardando || !categorias.length} className="min-w-0 space-y-5">
                 <div className="min-w-0 rounded-xl border border-slate-100 bg-white p-3 sm:p-5">
@@ -1678,18 +1710,18 @@ export default function Equipos() {
                   </div>
                   <div className="mt-4 space-y-4">
                     <label className="grid gap-2 text-sm sm:grid-cols-[190px_minmax(0,1fr)] sm:items-center">
-                      <span className="font-semibold text-slate-700">Nombre o descripción <span className="text-orange-600">*</span></span>
-                      <input required maxLength={200} aria-invalid={Boolean(erroresCampos.nombre)} aria-describedby={erroresCampos.nombre ? 'error-nombre' : undefined} value={datos.nombre} onChange={(e) => cambiarDato('nombre', e.target.value)} placeholder="Ej. Computadora de oficina" className="w-full rounded-xl border border-slate-200 px-3.5 py-3 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-orange-400 focus:ring-4 focus:ring-orange-100" />
+                      <span className="font-semibold text-slate-700">Nombre o descripción <span className="text-blue-600">*</span></span>
+                      <input required maxLength={200} aria-invalid={Boolean(erroresCampos.nombre)} aria-describedby={erroresCampos.nombre ? 'error-nombre' : undefined} value={datos.nombre} onChange={(e) => cambiarDato('nombre', e.target.value)} placeholder="Ej. Computadora de oficina" className="w-full rounded-xl border border-slate-200 px-3.5 py-3 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:ring-4 focus:ring-blue-100" />
                       {erroresCampos.nombre && <span id="error-nombre" role="alert" className="block text-sm text-red-700">{erroresCampos.nombre}</span>}
                     </label>
                     <label className="grid gap-2 text-sm sm:grid-cols-[190px_minmax(0,1fr)] sm:items-center">
-                      <span className="font-semibold text-slate-700">Categoría <span className="text-orange-600">*</span></span>
+                      <span className="font-semibold text-slate-700">Categoría <span className="text-blue-600">*</span></span>
                       <span className="relative block">
                         <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400">
                           <path d="m20 13-7 7L3 10V4h6l11 9Z" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
                           <circle cx="7.5" cy="7.5" r="1" fill="currentColor" />
                         </svg>
-                        <select required aria-invalid={Boolean(erroresCampos.categoria_id)} aria-describedby={erroresCampos.categoria_id ? 'error-categoria_id' : undefined} value={datos.categoria_id} onChange={(e) => cambiarDato('categoria_id', e.target.value)} className="w-full appearance-none rounded-xl border border-slate-200 bg-white py-3 pl-10 pr-20 text-sm text-slate-800 outline-none transition focus:border-orange-400 focus:ring-4 focus:ring-orange-100">
+                        <select required aria-invalid={Boolean(erroresCampos.categoria_id)} aria-describedby={erroresCampos.categoria_id ? 'error-categoria_id' : undefined} value={datos.categoria_id} onChange={(e) => cambiarDato('categoria_id', e.target.value)} className="w-full appearance-none rounded-xl border border-slate-200 bg-white py-3 pl-10 pr-20 text-sm text-slate-800 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100">
                           <option value="">Selecciona una categoría</option>
                           {categorias.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}
                         </select>
@@ -1711,7 +1743,7 @@ export default function Equipos() {
                       {erroresCampos.categoria_id && <span id="error-categoria_id" role="alert" className="block text-sm text-red-700">{erroresCampos.categoria_id}</span>}
                     </label>
                     <label className="grid gap-2 text-sm sm:grid-cols-[190px_minmax(0,1fr)] sm:items-center">
-                      <span className="font-semibold text-slate-700">Ubicación <span className="text-orange-600">*</span></span>
+                      <span className="font-semibold text-slate-700">Ubicación <span className="text-blue-600">*</span></span>
                       <select required aria-invalid={Boolean(erroresCampos.ambiente_id)} aria-describedby={erroresCampos.ambiente_id ? 'error-ambiente_id' : undefined} value={datos.ambiente_id ?? ''} onChange={(e) => cambiarDato('ambiente_id', e.target.value || null)} className="mt-1 w-full rounded border border-slate-300 px-3 py-2">
                         <option value="">Sin ubicación asignada</option>
                         {ambientes.map((item) => <option key={item.id} value={item.id}>{nombreUbicacion(item)}</option>)}
@@ -1719,13 +1751,13 @@ export default function Equipos() {
                       {erroresCampos.ambiente_id && <span id="error-ambiente_id" role="alert" className="block text-sm text-red-700">{erroresCampos.ambiente_id}</span>}
                     </label>
                     <label className="grid gap-2 text-sm sm:grid-cols-[190px_minmax(0,1fr)] sm:items-center">
-                      <span className="font-semibold text-slate-700">Número de serie <span className="text-orange-600">*</span></span>
+                      <span className="font-semibold text-slate-700">Número de serie <span className="text-blue-600">*</span></span>
                       <input required maxLength={150} aria-invalid={Boolean(erroresCampos.numero_serie)} aria-describedby={erroresCampos.numero_serie ? 'error-numero_serie' : undefined} value={datos.numero_serie ?? ''} onChange={(e) => cambiarDato('numero_serie', e.target.value)} className="mt-1 w-full rounded border border-slate-300 px-3 py-2" />
                       {erroresCampos.numero_serie && <span id="error-numero_serie" role="alert" className="block text-sm text-red-700">{erroresCampos.numero_serie}</span>}
                     </label>
                     <label className="grid gap-2 text-sm sm:grid-cols-[190px_minmax(0,1fr)] sm:items-center">
                       <span className="font-semibold text-slate-700">Estado operativo *</span>
-                      <select required aria-invalid={Boolean(erroresCampos.estado_operativo)} aria-describedby={erroresCampos.estado_operativo ? 'error-estado_operativo' : undefined} value={datos.estado_operativo} onChange={(e) => cambiarDato('estado_operativo', e.target.value as EstadoOperativo)} className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-sm outline-none transition focus:border-orange-400 focus:ring-4 focus:ring-orange-100">
+                      <select required aria-invalid={Boolean(erroresCampos.estado_operativo)} aria-describedby={erroresCampos.estado_operativo ? 'error-estado_operativo' : undefined} value={datos.estado_operativo} onChange={(e) => cambiarDato('estado_operativo', e.target.value as EstadoOperativo)} className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100">
                         {estadosOperativos.map((item) => <option key={item} value={item}>{etiquetasEstado[item]}</option>)}
                       </select>
                       {erroresCampos.estado_operativo && <span id="error-estado_operativo" role="alert" className="block text-sm text-red-700">{erroresCampos.estado_operativo}</span>}
@@ -1824,15 +1856,15 @@ export default function Equipos() {
                                   event.preventDefault()
                                   seleccionarFotografiaPrincipal(event.dataTransfer.files[0])
                                 }}
-                                className="flex min-h-28 w-full flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white px-5 py-5 text-center transition hover:border-orange-300 hover:bg-orange-50/40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500"
+                                className="flex min-h-28 w-full flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white px-5 py-5 text-center transition hover:border-blue-300 hover:bg-blue-50/40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
                               >
-                                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-orange-100 text-orange-600">
+                                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 text-blue-600">
                                   <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" className="h-5 w-5">
                                     <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 15.5v3A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5v-3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
                                   </svg>
                                 </span>
                                 <span className="mt-2 text-sm font-semibold text-slate-800">
-                                  <span className="text-orange-700">Haz clic para cambiar</span> o arrastra y suelta
+                                  <span className="text-blue-700">Haz clic para cambiar</span> o arrastra y suelta
                                 </span>
                                 <span className="mt-1 text-xs text-slate-500">JPG, PNG o WebP · máximo 2 MB</span>
                               </button>
@@ -1840,9 +1872,9 @@ export default function Equipos() {
                             {foto && (
                               <>
                                 <div className="mt-2 flex items-center gap-3 rounded-lg border border-slate-200 p-3">
-                                  <span className="relative flex h-10 w-10 shrink-0 items-end justify-center rounded-md border border-slate-200 bg-white pb-1 text-[9px] font-bold text-orange-700">
+                                  <span className="relative flex h-10 w-10 shrink-0 items-end justify-center rounded-md border border-slate-200 bg-white pb-1 text-[9px] font-bold text-blue-700">
                                     {foto.archivo.name.split('.').pop()?.slice(0, 4).toUpperCase() ?? 'IMG'}
-                                    <span className="absolute -bottom-1 left-0 rounded bg-orange-700 px-1 text-[7px] text-white">ARCHIVO</span>
+                                    <span className="absolute -bottom-1 left-0 rounded bg-blue-700 px-1 text-[7px] text-white">ARCHIVO</span>
                                   </span>
                                   <span className="min-w-0 flex-1">
                                     <span className="block truncate text-sm font-semibold text-slate-700">{foto.archivo.name}</span>
@@ -1866,8 +1898,8 @@ export default function Equipos() {
                                   </button>
                                 </div>
                                 <div className="mt-2 flex items-center gap-2">
-                                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-orange-100" role="progressbar" aria-label="Archivo listo para guardar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={100}>
-                                    <div className="h-full w-full rounded-full bg-orange-500" />
+                                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-blue-100" role="progressbar" aria-label="Archivo listo para guardar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={100}>
+                                    <div className="h-full w-full rounded-full bg-blue-500" />
                                   </div>
                                   <span className="text-xs font-medium text-slate-600">100%</span>
                                 </div>
@@ -1927,7 +1959,7 @@ export default function Equipos() {
                               {fotoAdicional.map((seleccion, indice) => (
                                 <div key={`${seleccion.archivo.name}-${seleccion.archivo.size}-${seleccion.archivo.lastModified}-${indice}`} className="w-16">
                                   <div className="relative">
-                                    <img src={seleccion.vista} alt={`Vista previa de ${seleccion.archivo.name}`} className="h-16 w-16 rounded-md border border-orange-200 object-cover" />
+                                    <img src={seleccion.vista} alt={`Vista previa de ${seleccion.archivo.name}`} className="h-16 w-16 rounded-md border border-blue-200 object-cover" />
                                     <button
                                       type="button"
                                       aria-label={`Quitar ${seleccion.archivo.name}`}
@@ -1963,14 +1995,14 @@ export default function Equipos() {
                                 event.preventDefault()
                                 seleccionarFotografiasAdicionales(event.dataTransfer.files)
                               }}
-                              className="flex min-h-24 flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white px-4 py-4 text-center transition hover:border-orange-300 hover:bg-orange-50/40"
+                              className="flex min-h-24 flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white px-4 py-4 text-center transition hover:border-blue-300 hover:bg-blue-50/40"
                             >
-                              <span className="flex h-9 w-9 items-center justify-center rounded-full bg-orange-100 text-orange-600">
+                              <span className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-100 text-blue-600">
                                 <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" className="h-5 w-5">
                                   <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 15.5v3A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5v-3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
                                 </svg>
                               </span>
-                              <button ref={fotoAdicionalSelectorRef} type="button" onClick={() => fotoAdicionalInputRef.current?.click()} className="mt-2 text-sm font-semibold text-orange-700 hover:text-orange-800">
+                              <button ref={fotoAdicionalSelectorRef} type="button" onClick={() => fotoAdicionalInputRef.current?.click()} className="mt-2 text-sm font-semibold text-blue-700 hover:text-blue-800">
                                 Haz clic para añadir imágenes
                               </button>
                               <span className="mt-1 text-xs text-slate-500">o arrástralas aquí · Puedes seleccionar varias</span>
@@ -1980,7 +2012,7 @@ export default function Equipos() {
                                 type="button"
                                 disabled={!fotoAdicional.length || gestionandoFoto || !editando}
                                 onClick={() => void agregarFotoEditando()}
-                                className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-orange-200 hover:bg-orange-50 disabled:opacity-50"
+                                className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 disabled:opacity-50"
                               >
                                 {gestionandoFoto ? 'Subiendo...' : editando ? `Subir imágenes${fotoAdicional.length ? ` (${fotoAdicional.length})` : ''}` : `${fotoAdicional.length} lista(s) para guardar`}
                               </button>
@@ -2001,7 +2033,7 @@ export default function Equipos() {
               )}
               <div className="grid grid-cols-2 gap-2 border-t border-slate-100 pt-4 sm:flex sm:justify-end">
                 <button type="button" onClick={() => setModalAbierto(false)} className="min-h-10 rounded-lg px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-100">Cancelar</button>
-                <button type="submit" disabled={guardando || cargandoDatosEdicion || Boolean(errorDatosEdicion) || !categorias.length} className="min-h-10 rounded-lg bg-orange-700 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-800 disabled:opacity-60">
+                <button type="submit" disabled={guardando || cargandoDatosEdicion || Boolean(errorDatosEdicion) || !categorias.length} className="min-h-10 rounded-lg bg-blue-700 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-800 disabled:opacity-60">
                   {guardando ? 'Guardando...' : editando ? 'Guardar cambios' : 'Registrar equipo'}
                 </button>
               </div>
@@ -2015,7 +2047,7 @@ export default function Equipos() {
 
       {equipoDetalle && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/50 p-3 sm:p-8">
-          <section className="mx-auto max-w-4xl rounded-xl bg-white p-4 shadow-xl sm:p-6">
+          <section role="dialog" aria-modal="true" aria-label="Ficha del equipo" className="mx-auto max-w-4xl rounded-2xl border border-slate-200 bg-white p-4 shadow-xl sm:p-6">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-blue-700">{equipoDetalle.codigo_institucional}</p>
@@ -2034,9 +2066,11 @@ export default function Equipos() {
                 {aviso}
               </p>
             )}
+            <div className="mt-4 flex items-center gap-3"><EstadoEquipoBadge estado={equipoDetalle.estado_operativo} situacion={equipoDetalle.situacion} /><span className="text-xs text-slate-500">Una ficha por activo · ubicación física única</span></div>
+            <div role="group" aria-label="Secciones de la ficha" className="mt-5 flex gap-1 overflow-x-auto border-b border-slate-200 pb-2">{[['general','General'],['uso','Áreas usuarias'],['tecnica','Información técnica'],['fotos','Fotografías'],['historial','Historial']].map(([id,label]) => <button key={id} type="button" aria-pressed={pestanaDetalle === id} onClick={() => setPestanaDetalle(id)} className={`min-h-11 shrink-0 rounded-lg px-4 py-2 text-sm font-semibold ${pestanaDetalle === id ? 'bg-blue-50 text-blue-800 ring-1 ring-blue-200' : 'text-slate-600 hover:bg-slate-50'}`}>{label}</button>)}</div>
             {detalleCargando ? <p className="py-8 text-center">Cargando detalle...</p> : (
               <div className="mt-4 space-y-5">
-                <dl className="grid gap-3 rounded-lg bg-slate-50 p-4 text-sm sm:grid-cols-2 lg:grid-cols-3">
+                <section hidden={pestanaDetalle !== 'general'} aria-label="Información general"><dl className="grid gap-3 rounded-lg bg-slate-50 p-4 text-sm sm:grid-cols-2 lg:grid-cols-3">
                   <div><dt className="text-slate-500">Número de serie</dt><dd className="font-medium">{equipoDetalle.numero_serie ?? '—'}</dd></div>
                   <div><dt className="text-slate-500">Código patrimonial</dt><dd className="font-medium">{equipoDetalle.codigo_patrimonial ?? '—'}</dd></div>
                   <div><dt className="text-slate-500">Estado operativo</dt><dd className="font-medium">{equipoDetalle.situacion === 'baja' ? 'Dado de baja' : etiquetasEstado[equipoDetalle.estado_operativo]}</dd></div>
@@ -2047,8 +2081,9 @@ export default function Equipos() {
                   <div><dt className="text-slate-500">Registrado</dt><dd className="font-medium">{new Date(equipoDetalle.created_at).toLocaleString()}</dd></div>
                   <div><dt className="text-slate-500">Actualizado</dt><dd className="font-medium">{new Date(equipoDetalle.updated_at).toLocaleString()}</dd></div>
                   <div className="sm:col-span-2 lg:col-span-3"><dt className="text-slate-500">Observaciones</dt><dd className="font-medium">{equipoDetalle.observaciones || '—'}</dd></div>
-                </dl>
-
+                </dl></section>
+                <section hidden={pestanaDetalle !== 'uso'} aria-label="Uso compartido"><AreasUsuariasEquipo key={equipoDetalle.id} equipoId={equipoDetalle.id} ambientes={ambientes} puedeEditar={puedeEditar && equipoDetalle.situacion === 'activo'} onGuardado={(ids) => { setAreasPorEquipo((actual) => ({ ...actual, [equipoDetalle.id]: ids })); setErrorUsoCompartido('') }} /></section>
+                <section hidden={pestanaDetalle !== 'tecnica'} aria-label="Información técnica" className="space-y-5">
                 <div>
                   <h4 className="font-semibold">Componentes y características técnicas</h4>
                   {componentes.length ? (
@@ -2102,7 +2137,8 @@ export default function Equipos() {
                   )}
                 </div>
 
-                <div>
+                </section>
+                <section hidden={pestanaDetalle !== 'fotos'} aria-label="Fotografías del equipo"><div>
                   <h4 className="font-semibold">Fotografías</h4>
                   {fotografiasCargando && (
                     <p role="status" className="mt-2 text-sm text-slate-500">Cargando fotografías…</p>
@@ -2166,6 +2202,9 @@ export default function Equipos() {
                   )}
                 </div>
 
+                </section>
+                <section hidden={pestanaDetalle !== 'historial'} aria-label="Historial del equipo">
+                {!puedeVerMantenimientos && !puedeVerMovimientos && <p className="text-sm text-slate-500">Tu perfil no tiene acceso al historial de mantenimientos y movimientos.</p>}
                 {(puedeVerMantenimientos || puedeVerMovimientos) && (
                   <div className="grid gap-4 lg:grid-cols-2">
                     {puedeVerMantenimientos && (
@@ -2218,6 +2257,7 @@ export default function Equipos() {
                     )}
                   </div>
                 )}
+                </section>
               </div>
             )}
             <div className="mt-5 grid grid-cols-1 gap-2 min-[420px]:grid-cols-2 sm:flex sm:justify-end">
