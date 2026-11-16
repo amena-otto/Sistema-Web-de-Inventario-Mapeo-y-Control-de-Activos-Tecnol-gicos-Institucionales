@@ -74,7 +74,7 @@ export default function Login() {
     <main className="flex min-h-screen items-center justify-center bg-slate-100 px-4 py-10">
       <section className="w-full max-w-md rounded-2xl bg-white p-8 shadow-lg">
         <div className="mb-8 text-center">
-          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-xl bg-blue-600 text-2xl font-bold text-white">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-xl bg-orange-600 text-2xl font-bold text-white">
             OT
           </div>
 
@@ -106,7 +106,7 @@ export default function Login() {
               value={correo}
               onChange={(event) => setCorreo(event.target.value)}
               placeholder="usuario@ottotonsmann.edu.pe"
-              className="w-full rounded-lg border border-slate-300 px-4 py-3 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              className="w-full rounded-lg border border-slate-300 px-4 py-3 outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-100"
             />
           </div>
 
@@ -126,7 +126,7 @@ export default function Login() {
               value={contrasena}
               onChange={(event) => setContrasena(event.target.value)}
               placeholder="Ingresa tu contraseña"
-              className="w-full rounded-lg border border-slate-300 px-4 py-3 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              className="w-full rounded-lg border border-slate-300 px-4 py-3 outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-100"
             />
           </div>
 
@@ -139,11 +139,11 @@ export default function Login() {
           <button
             type="submit"
             disabled={enviando}
-            className="w-full rounded-lg bg-blue-600 px-4 py-3 font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+            className="w-full rounded-lg bg-orange-600 px-4 py-3 font-semibold text-white transition hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {enviando ? 'Iniciando sesión...' : 'Iniciar sesión'}
           </button>
-          <Link to="/recuperar-password" className="block text-center text-sm text-blue-600 hover:underline">
+          <Link to="/recuperar-password" className="block text-center text-sm text-orange-600 hover:underline">
             ¿Olvidaste tu contraseña?
           </Link>
         </form>

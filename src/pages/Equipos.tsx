@@ -1208,7 +1208,7 @@ export default function Equipos() {
             <button
               type="button"
               onClick={iniciarNuevo}
-              className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+              className="rounded-lg bg-orange-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500"
             >
               Nuevo equipo
             </button>
@@ -1238,9 +1238,9 @@ export default function Equipos() {
           type="button"
           aria-pressed={!verEquiposDadosDeBaja}
           onClick={() => seleccionarVistaEquipos(false)}
-          className={`min-h-11 rounded-lg px-4 py-2 text-sm font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 ${
+          className={`min-h-11 rounded-lg px-4 py-2 text-sm font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500 ${
             !verEquiposDadosDeBaja
-              ? 'bg-blue-700 text-white shadow-sm'
+              ? 'bg-orange-700 text-white shadow-sm'
               : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
           }`}
         >
@@ -1250,9 +1250,9 @@ export default function Equipos() {
           type="button"
           aria-pressed={verEquiposDadosDeBaja}
           onClick={() => seleccionarVistaEquipos(true)}
-          className={`min-h-11 rounded-lg px-4 py-2 text-sm font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 ${
+          className={`min-h-11 rounded-lg px-4 py-2 text-sm font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500 ${
             verEquiposDadosDeBaja
-              ? 'bg-blue-700 text-white shadow-sm'
+              ? 'bg-orange-700 text-white shadow-sm'
               : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
           }`}
         >
@@ -1328,10 +1328,10 @@ export default function Equipos() {
         { valor: categoriaFiltro, texto: `Categoría: ${categoriasPorId.get(categoriaFiltro) ?? categoriaFiltro}`, quitar: () => setCategoriaFiltro('') },
         { valor: ambienteFiltro, texto: `Ubicación: ${ambientesPorId.get(ambienteFiltro)?.nombre ?? ambienteFiltro}`, quitar: () => setAmbienteFiltro('') },
         { valor: estado, texto: `Estado: ${etiquetasEstado[estado] ?? estado}`, quitar: () => setEstado('') },
-      ].filter((f) => f.valor).map((f) => <button key={f.texto} type="button" aria-label={`Quitar ${f.texto}`} onClick={() => { f.quitar(); setPagina(1) }} className="inline-flex min-h-9 items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-blue-900">{f.texto}<span aria-hidden="true">×</span></button>)}<button type="button" onClick={limpiarFiltros} className="min-h-9 px-2 font-semibold text-slate-600 underline">Limpiar todo</button></div>}
+      ].filter((f) => f.valor).map((f) => <button key={f.texto} type="button" aria-label={`Quitar ${f.texto}`} onClick={() => { f.quitar(); setPagina(1) }} className="inline-flex min-h-9 items-center gap-2 rounded-full border border-orange-200 bg-orange-50 px-3 py-1 text-orange-900">{f.texto}<span aria-hidden="true">×</span></button>)}<button type="button" onClick={limpiarFiltros} className="min-h-9 px-2 font-semibold text-slate-600 underline">Limpiar todo</button></div>}
 
       {(ambienteFiltrosIds.length > 0 || sinUbicacionFiltro) && (
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-900">
           <span>
             {sinUbicacionFiltro
               ? 'Equipos sin ubicación asignada'
@@ -1344,14 +1344,14 @@ export default function Equipos() {
               setSinUbicacionFiltro(false)
               setPagina(1)
             }}
-            className="font-semibold text-blue-800 hover:underline"
+            className="font-semibold text-orange-800 hover:underline"
           >
             Quitar filtro
           </button>
         </div>
       )}
 
-      <div role="group" aria-label="Presentación de equipos" className="mt-4 hidden justify-end gap-1 lg:flex">{(['tabla','tarjetas'] as const).map((vista) => <button key={vista} type="button" aria-pressed={vistaEquipos === vista} onClick={() => setVistaEquipos(vista)} className={`min-h-10 rounded-lg border px-4 py-2 text-sm font-semibold ${vistaEquipos === vista ? 'border-blue-300 bg-blue-50 text-blue-800' : 'border-slate-200 bg-white text-slate-600'}`}>{vista === 'tabla' ? 'Tabla' : 'Tarjetas'}</button>)}</div>
+      <div role="group" aria-label="Presentación de equipos" className="mt-4 hidden justify-end gap-1 lg:flex">{(['tabla','tarjetas'] as const).map((vista) => <button key={vista} type="button" aria-pressed={vistaEquipos === vista} onClick={() => setVistaEquipos(vista)} className={`min-h-10 rounded-lg border px-4 py-2 text-sm font-semibold ${vistaEquipos === vista ? 'border-orange-300 bg-orange-50 text-orange-800' : 'border-slate-200 bg-white text-slate-600'}`}>{vista === 'tabla' ? 'Tabla' : 'Tarjetas'}</button>)}</div>
       <div ref={listadoRef} className="mt-4 min-w-0 scroll-mt-24 overflow-hidden rounded-xl bg-white shadow" aria-busy={cargando}>
         <div className="flex flex-col items-stretch justify-between gap-3 border-b border-slate-100 px-3 py-3 sm:flex-row sm:items-center sm:px-4">
           <h2 className="min-w-0 font-semibold text-slate-800">
@@ -1367,7 +1367,7 @@ export default function Equipos() {
                 setOrden(valor)
                 setPagina(1)
               }}
-              className="min-h-10 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+              className="min-h-10 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500"
             >
               {ordenesEquipos.map((opcion) => (
                 <option key={opcion.valor} value={opcion.valor}>{opcion.etiqueta}</option>
@@ -1388,14 +1388,14 @@ export default function Equipos() {
             }}
           />
         </div>
-        <div className="flex flex-wrap items-center gap-3 border-b border-slate-100 bg-blue-50/50 px-4 py-3">
+        <div className="flex flex-wrap items-center gap-3 border-b border-slate-100 bg-orange-50/40 px-4 py-3">
           <label className="flex min-h-9 items-center gap-2 text-sm text-slate-700">
             <input type="checkbox" className="h-4 w-4" disabled={cargando || !equipos.length} checked={equipos.length > 0 && equipos.every((equipo) => seleccionQr.has(equipo.id))} ref={(input) => { if (input) input.indeterminate = equipos.some((equipo) => seleccionQr.has(equipo.id)) && !equipos.every((equipo) => seleccionQr.has(equipo.id)) }} onChange={(event) => seleccionarPaginaEtiquetas(event.target.checked)} />
             Seleccionar esta página
           </label>
           <span role="status" aria-live="polite" className="text-sm text-slate-600">{seleccionQr.size} equipo(s) seleccionado(s)</span>
-          <button type="button" disabled={!seleccionQr.size} onClick={() => setEquiposQr([...seleccionQr.values()].map((seleccionado) => equipos.find((actual) => actual.id === seleccionado.id) ?? seleccionado))} className="min-h-10 rounded-lg bg-blue-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">Vista previa e impresión masiva</button>
-          {seleccionQr.size > 0 && <button type="button" onClick={() => setSeleccionQr(new Map())} className="min-h-9 text-sm font-semibold text-blue-800 underline">Limpiar selección</button>}
+          <button type="button" disabled={!seleccionQr.size} onClick={() => setEquiposQr([...seleccionQr.values()].map((seleccionado) => equipos.find((actual) => actual.id === seleccionado.id) ?? seleccionado))} className="min-h-10 rounded-lg bg-orange-700 px-3 py-2 text-sm font-semibold text-white transition hover:bg-orange-800 disabled:opacity-50">Vista previa e impresión masiva</button>
+          {seleccionQr.size > 0 && <button type="button" onClick={() => setSeleccionQr(new Map())} className="min-h-9 text-sm font-semibold text-orange-800 underline">Limpiar selección</button>}
           <p className="w-full text-xs text-slate-500">La selección se conserva al cambiar de página o aplicar filtros.</p>
         </div>
         {cargando && (
@@ -1483,7 +1483,7 @@ export default function Equipos() {
                   )}
                 </dl>
                 <div className="grid grid-cols-2 gap-2 min-[420px]:grid-cols-3">
-                  <button type="button" onClick={() => setEquipoQr(equipo)} className="min-h-10 rounded-lg border border-blue-200 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50">QR</button>
+                  <button type="button" onClick={() => setEquipoQr(equipo)} className="min-h-10 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">QR</button>
                   <button type="button" onClick={() => void abrirDetalle(equipo)} className="min-h-10 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Detalle</button>
                   {puedeEditar && !deBaja && (
                     <button type="button" onClick={() => void iniciarEdicion(equipo)} className="min-h-10 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Editar</button>
@@ -1558,7 +1558,7 @@ export default function Equipos() {
                     </td>
                     <td className="px-3 py-4">
                       <div className="flex flex-wrap gap-1.5">
-                        <button type="button" onClick={() => setEquipoQr(equipo)} className="min-h-9 rounded-lg border border-blue-200 px-3 py-1.5 text-sm font-semibold text-blue-700 hover:bg-blue-50">QR</button>
+                        <button type="button" onClick={() => setEquipoQr(equipo)} className="min-h-9 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">QR</button>
                         <button type="button" onClick={() => void abrirDetalle(equipo)} className="min-h-9 rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50">Detalle</button>
                         {puedeEditar && !deBaja && (
                           <button type="button" onClick={() => void iniciarEdicion(equipo)} className="min-h-9 rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50">Editar</button>
@@ -1643,7 +1643,7 @@ export default function Equipos() {
               </label>
               <div className="mt-4 flex justify-end gap-2">
                 <button type="button" disabled={guardandoCategoria} onClick={() => setCategoriaModal(false)} className="rounded border border-slate-300 px-4 py-2">Cerrar</button>
-                <button type="submit" disabled={guardandoCategoria} className="rounded bg-blue-600 px-4 py-2 font-semibold text-white disabled:opacity-60">{guardandoCategoria ? 'Guardando...' : 'Crear categoría'}</button>
+                <button type="submit" disabled={guardandoCategoria} className="rounded bg-orange-600 px-4 py-2 font-semibold text-white disabled:opacity-60">{guardandoCategoria ? 'Guardando...' : 'Crear categoría'}</button>
               </div>
             </form>
           </section>
@@ -1672,7 +1672,7 @@ export default function Equipos() {
                   type="submit"
                   form="formulario-equipo"
                   disabled={guardando || cargandoDatosEdicion || Boolean(errorDatosEdicion) || !categorias.length}
-                  className="min-h-10 rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-800 disabled:opacity-60"
+                  className="min-h-10 rounded-lg bg-orange-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-800 disabled:opacity-60"
                 >
                   {guardando ? 'Guardando...' : editando ? 'Guardar cambios' : 'Guardar equipo'}
                 </button>
@@ -1710,18 +1710,18 @@ export default function Equipos() {
                   </div>
                   <div className="mt-4 space-y-4">
                     <label className="grid gap-2 text-sm sm:grid-cols-[190px_minmax(0,1fr)] sm:items-center">
-                      <span className="font-semibold text-slate-700">Nombre o descripción <span className="text-blue-600">*</span></span>
-                      <input required maxLength={200} aria-invalid={Boolean(erroresCampos.nombre)} aria-describedby={erroresCampos.nombre ? 'error-nombre' : undefined} value={datos.nombre} onChange={(e) => cambiarDato('nombre', e.target.value)} placeholder="Ej. Computadora de oficina" className="w-full rounded-xl border border-slate-200 px-3.5 py-3 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:ring-4 focus:ring-blue-100" />
+                      <span className="font-semibold text-slate-700">Nombre o descripción <span className="text-orange-600">*</span></span>
+                      <input required maxLength={200} aria-invalid={Boolean(erroresCampos.nombre)} aria-describedby={erroresCampos.nombre ? 'error-nombre' : undefined} value={datos.nombre} onChange={(e) => cambiarDato('nombre', e.target.value)} placeholder="Ej. Computadora de oficina" className="w-full rounded-xl border border-slate-200 px-3.5 py-3 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-orange-400 focus:ring-4 focus:ring-orange-100" />
                       {erroresCampos.nombre && <span id="error-nombre" role="alert" className="block text-sm text-red-700">{erroresCampos.nombre}</span>}
                     </label>
                     <label className="grid gap-2 text-sm sm:grid-cols-[190px_minmax(0,1fr)] sm:items-center">
-                      <span className="font-semibold text-slate-700">Categoría <span className="text-blue-600">*</span></span>
+                      <span className="font-semibold text-slate-700">Categoría <span className="text-orange-600">*</span></span>
                       <span className="relative block">
                         <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400">
                           <path d="m20 13-7 7L3 10V4h6l11 9Z" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
                           <circle cx="7.5" cy="7.5" r="1" fill="currentColor" />
                         </svg>
-                        <select required aria-invalid={Boolean(erroresCampos.categoria_id)} aria-describedby={erroresCampos.categoria_id ? 'error-categoria_id' : undefined} value={datos.categoria_id} onChange={(e) => cambiarDato('categoria_id', e.target.value)} className="w-full appearance-none rounded-xl border border-slate-200 bg-white py-3 pl-10 pr-20 text-sm text-slate-800 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100">
+                        <select required aria-invalid={Boolean(erroresCampos.categoria_id)} aria-describedby={erroresCampos.categoria_id ? 'error-categoria_id' : undefined} value={datos.categoria_id} onChange={(e) => cambiarDato('categoria_id', e.target.value)} className="w-full appearance-none rounded-xl border border-slate-200 bg-white py-3 pl-10 pr-20 text-sm text-slate-800 outline-none transition focus:border-orange-400 focus:ring-4 focus:ring-orange-100">
                           <option value="">Selecciona una categoría</option>
                           {categorias.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}
                         </select>
@@ -1743,7 +1743,7 @@ export default function Equipos() {
                       {erroresCampos.categoria_id && <span id="error-categoria_id" role="alert" className="block text-sm text-red-700">{erroresCampos.categoria_id}</span>}
                     </label>
                     <label className="grid gap-2 text-sm sm:grid-cols-[190px_minmax(0,1fr)] sm:items-center">
-                      <span className="font-semibold text-slate-700">Ubicación <span className="text-blue-600">*</span></span>
+                      <span className="font-semibold text-slate-700">Ubicación <span className="text-orange-600">*</span></span>
                       <select required aria-invalid={Boolean(erroresCampos.ambiente_id)} aria-describedby={erroresCampos.ambiente_id ? 'error-ambiente_id' : undefined} value={datos.ambiente_id ?? ''} onChange={(e) => cambiarDato('ambiente_id', e.target.value || null)} className="mt-1 w-full rounded border border-slate-300 px-3 py-2">
                         <option value="">Sin ubicación asignada</option>
                         {ambientes.map((item) => <option key={item.id} value={item.id}>{nombreUbicacion(item)}</option>)}
@@ -1751,13 +1751,13 @@ export default function Equipos() {
                       {erroresCampos.ambiente_id && <span id="error-ambiente_id" role="alert" className="block text-sm text-red-700">{erroresCampos.ambiente_id}</span>}
                     </label>
                     <label className="grid gap-2 text-sm sm:grid-cols-[190px_minmax(0,1fr)] sm:items-center">
-                      <span className="font-semibold text-slate-700">Número de serie <span className="text-blue-600">*</span></span>
+                      <span className="font-semibold text-slate-700">Número de serie <span className="text-orange-600">*</span></span>
                       <input required maxLength={150} aria-invalid={Boolean(erroresCampos.numero_serie)} aria-describedby={erroresCampos.numero_serie ? 'error-numero_serie' : undefined} value={datos.numero_serie ?? ''} onChange={(e) => cambiarDato('numero_serie', e.target.value)} className="mt-1 w-full rounded border border-slate-300 px-3 py-2" />
                       {erroresCampos.numero_serie && <span id="error-numero_serie" role="alert" className="block text-sm text-red-700">{erroresCampos.numero_serie}</span>}
                     </label>
                     <label className="grid gap-2 text-sm sm:grid-cols-[190px_minmax(0,1fr)] sm:items-center">
                       <span className="font-semibold text-slate-700">Estado operativo *</span>
-                      <select required aria-invalid={Boolean(erroresCampos.estado_operativo)} aria-describedby={erroresCampos.estado_operativo ? 'error-estado_operativo' : undefined} value={datos.estado_operativo} onChange={(e) => cambiarDato('estado_operativo', e.target.value as EstadoOperativo)} className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100">
+                      <select required aria-invalid={Boolean(erroresCampos.estado_operativo)} aria-describedby={erroresCampos.estado_operativo ? 'error-estado_operativo' : undefined} value={datos.estado_operativo} onChange={(e) => cambiarDato('estado_operativo', e.target.value as EstadoOperativo)} className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-sm outline-none transition focus:border-orange-400 focus:ring-4 focus:ring-orange-100">
                         {estadosOperativos.map((item) => <option key={item} value={item}>{etiquetasEstado[item]}</option>)}
                       </select>
                       {erroresCampos.estado_operativo && <span id="error-estado_operativo" role="alert" className="block text-sm text-red-700">{erroresCampos.estado_operativo}</span>}
@@ -1856,15 +1856,15 @@ export default function Equipos() {
                                   event.preventDefault()
                                   seleccionarFotografiaPrincipal(event.dataTransfer.files[0])
                                 }}
-                                className="flex min-h-28 w-full flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white px-5 py-5 text-center transition hover:border-blue-300 hover:bg-blue-50/40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+                                className="flex min-h-28 w-full flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white px-5 py-5 text-center transition hover:border-orange-300 hover:bg-orange-50/40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500"
                               >
-                                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 text-blue-600">
+                                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-orange-100 text-orange-600">
                                   <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" className="h-5 w-5">
                                     <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 15.5v3A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5v-3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
                                   </svg>
                                 </span>
                                 <span className="mt-2 text-sm font-semibold text-slate-800">
-                                  <span className="text-blue-700">Haz clic para cambiar</span> o arrastra y suelta
+                                  <span className="text-orange-700">Haz clic para cambiar</span> o arrastra y suelta
                                 </span>
                                 <span className="mt-1 text-xs text-slate-500">JPG, PNG o WebP · máximo 2 MB</span>
                               </button>
@@ -1872,9 +1872,9 @@ export default function Equipos() {
                             {foto && (
                               <>
                                 <div className="mt-2 flex items-center gap-3 rounded-lg border border-slate-200 p-3">
-                                  <span className="relative flex h-10 w-10 shrink-0 items-end justify-center rounded-md border border-slate-200 bg-white pb-1 text-[9px] font-bold text-blue-700">
+                                  <span className="relative flex h-10 w-10 shrink-0 items-end justify-center rounded-md border border-slate-200 bg-white pb-1 text-[9px] font-bold text-orange-700">
                                     {foto.archivo.name.split('.').pop()?.slice(0, 4).toUpperCase() ?? 'IMG'}
-                                    <span className="absolute -bottom-1 left-0 rounded bg-blue-700 px-1 text-[7px] text-white">ARCHIVO</span>
+                                    <span className="absolute -bottom-1 left-0 rounded bg-orange-700 px-1 text-[7px] text-white">ARCHIVO</span>
                                   </span>
                                   <span className="min-w-0 flex-1">
                                     <span className="block truncate text-sm font-semibold text-slate-700">{foto.archivo.name}</span>
@@ -1898,8 +1898,8 @@ export default function Equipos() {
                                   </button>
                                 </div>
                                 <div className="mt-2 flex items-center gap-2">
-                                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-blue-100" role="progressbar" aria-label="Archivo listo para guardar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={100}>
-                                    <div className="h-full w-full rounded-full bg-blue-500" />
+                                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-orange-100" role="progressbar" aria-label="Archivo listo para guardar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={100}>
+                                    <div className="h-full w-full rounded-full bg-orange-500" />
                                   </div>
                                   <span className="text-xs font-medium text-slate-600">100%</span>
                                 </div>
@@ -1939,7 +1939,7 @@ export default function Equipos() {
                                       aria-label="Usar como imagen principal"
                                       title="Usar como imagen principal"
                                       onClick={() => void cambiarFotografiaPrincipal(editando.id, fotografia)}
-                                      className="text-xs font-medium text-blue-700 hover:underline disabled:opacity-50"
+                                      className="text-xs font-medium text-orange-700 hover:underline disabled:opacity-50"
                                     >
                                       Principal
                                     </button>
@@ -1959,7 +1959,7 @@ export default function Equipos() {
                               {fotoAdicional.map((seleccion, indice) => (
                                 <div key={`${seleccion.archivo.name}-${seleccion.archivo.size}-${seleccion.archivo.lastModified}-${indice}`} className="w-16">
                                   <div className="relative">
-                                    <img src={seleccion.vista} alt={`Vista previa de ${seleccion.archivo.name}`} className="h-16 w-16 rounded-md border border-blue-200 object-cover" />
+                                    <img src={seleccion.vista} alt={`Vista previa de ${seleccion.archivo.name}`} className="h-16 w-16 rounded-md border border-orange-200 object-cover" />
                                     <button
                                       type="button"
                                       aria-label={`Quitar ${seleccion.archivo.name}`}
@@ -1995,14 +1995,14 @@ export default function Equipos() {
                                 event.preventDefault()
                                 seleccionarFotografiasAdicionales(event.dataTransfer.files)
                               }}
-                              className="flex min-h-24 flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white px-4 py-4 text-center transition hover:border-blue-300 hover:bg-blue-50/40"
+                              className="flex min-h-24 flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white px-4 py-4 text-center transition hover:border-orange-300 hover:bg-orange-50/40"
                             >
-                              <span className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-100 text-blue-600">
+                              <span className="flex h-9 w-9 items-center justify-center rounded-full bg-orange-100 text-orange-600">
                                 <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" className="h-5 w-5">
                                   <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 15.5v3A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5v-3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
                                 </svg>
                               </span>
-                              <button ref={fotoAdicionalSelectorRef} type="button" onClick={() => fotoAdicionalInputRef.current?.click()} className="mt-2 text-sm font-semibold text-blue-700 hover:text-blue-800">
+                              <button ref={fotoAdicionalSelectorRef} type="button" onClick={() => fotoAdicionalInputRef.current?.click()} className="mt-2 text-sm font-semibold text-orange-700 hover:text-orange-800">
                                 Haz clic para añadir imágenes
                               </button>
                               <span className="mt-1 text-xs text-slate-500">o arrástralas aquí · Puedes seleccionar varias</span>
@@ -2012,7 +2012,7 @@ export default function Equipos() {
                                 type="button"
                                 disabled={!fotoAdicional.length || gestionandoFoto || !editando}
                                 onClick={() => void agregarFotoEditando()}
-                                className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 disabled:opacity-50"
+                                className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-orange-200 hover:bg-orange-50 disabled:opacity-50"
                               >
                                 {gestionandoFoto ? 'Subiendo...' : editando ? `Subir imágenes${fotoAdicional.length ? ` (${fotoAdicional.length})` : ''}` : `${fotoAdicional.length} lista(s) para guardar`}
                               </button>
@@ -2033,7 +2033,7 @@ export default function Equipos() {
               )}
               <div className="grid grid-cols-2 gap-2 border-t border-slate-100 pt-4 sm:flex sm:justify-end">
                 <button type="button" onClick={() => setModalAbierto(false)} className="min-h-10 rounded-lg px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-100">Cancelar</button>
-                <button type="submit" disabled={guardando || cargandoDatosEdicion || Boolean(errorDatosEdicion) || !categorias.length} className="min-h-10 rounded-lg bg-blue-700 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-800 disabled:opacity-60">
+                <button type="submit" disabled={guardando || cargandoDatosEdicion || Boolean(errorDatosEdicion) || !categorias.length} className="min-h-10 rounded-lg bg-orange-700 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-800 disabled:opacity-60">
                   {guardando ? 'Guardando...' : editando ? 'Guardar cambios' : 'Registrar equipo'}
                 </button>
               </div>
@@ -2067,7 +2067,7 @@ export default function Equipos() {
               </p>
             )}
             <div className="mt-4 flex items-center gap-3"><EstadoEquipoBadge estado={equipoDetalle.estado_operativo} situacion={equipoDetalle.situacion} /><span className="text-xs text-slate-500">Una ficha por activo · ubicación física única</span></div>
-            <div role="group" aria-label="Secciones de la ficha" className="mt-5 flex gap-1 overflow-x-auto border-b border-slate-200 pb-2">{[['general','General'],['uso','Áreas usuarias'],['tecnica','Información técnica'],['fotos','Fotografías'],['historial','Historial']].map(([id,label]) => <button key={id} type="button" aria-pressed={pestanaDetalle === id} onClick={() => setPestanaDetalle(id)} className={`min-h-11 shrink-0 rounded-lg px-4 py-2 text-sm font-semibold ${pestanaDetalle === id ? 'bg-blue-50 text-blue-800 ring-1 ring-blue-200' : 'text-slate-600 hover:bg-slate-50'}`}>{label}</button>)}</div>
+            <div role="group" aria-label="Secciones de la ficha" className="mt-5 flex gap-1 overflow-x-auto border-b border-slate-200 pb-2">{[['general','General'],['uso','Áreas usuarias'],['tecnica','Información técnica'],['fotos','Fotografías'],['historial','Historial']].map(([id,label]) => <button key={id} type="button" aria-pressed={pestanaDetalle === id} onClick={() => setPestanaDetalle(id)} className={`min-h-11 shrink-0 rounded-lg px-4 py-2 text-sm font-semibold ${pestanaDetalle === id ? 'bg-orange-50 text-orange-800 ring-1 ring-orange-200' : 'text-slate-600 hover:bg-slate-50'}`}>{label}</button>)}</div>
             {detalleCargando ? <p className="py-8 text-center">Cargando detalle...</p> : (
               <div className="mt-4 space-y-5">
                 <section hidden={pestanaDetalle !== 'general'} aria-label="Información general"><dl className="grid gap-3 rounded-lg bg-slate-50 p-4 text-sm sm:grid-cols-2 lg:grid-cols-3">
@@ -2163,7 +2163,7 @@ export default function Equipos() {
                             <img src={fotografia.url} alt={fotografia.descripcion ?? `Fotografía de ${equipoDetalle.codigo_institucional}`} className="h-32 w-40 rounded-lg border object-cover" />
                           </a>
                           <div className="mt-1 flex flex-wrap items-center gap-1">
-                            <span className={`rounded px-2 py-1 text-[10px] font-semibold ${fotografia.tipo === 'principal' ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-600'}`}>
+                            <span className={`rounded px-2 py-1 text-[10px] font-semibold ${fotografia.tipo === 'principal' ? 'bg-orange-100 text-orange-800' : 'bg-slate-100 text-slate-600'}`}>
                               {fotografia.tipo === 'principal' ? 'Principal' : 'Adicional'}
                             </span>
                             {puedeEditar && equipoDetalle.situacion === 'activo' && fotografia.tipo !== 'principal' && (
@@ -2171,7 +2171,7 @@ export default function Equipos() {
                                 type="button"
                                 disabled={gestionandoFoto}
                                 onClick={() => void cambiarFotografiaPrincipal(equipoDetalle.id, fotografia)}
-                                className="text-xs font-medium text-blue-700 hover:underline disabled:opacity-50"
+                                className="text-xs font-medium text-orange-700 hover:underline disabled:opacity-50"
                               >
                                 Hacer principal
                               </button>
@@ -2228,7 +2228,7 @@ export default function Equipos() {
                         {equipoDetalle && (
                           <Link
                             to={`/mantenimientos?equipo=${equipoDetalle.id}`}
-                            className="mt-3 inline-flex text-sm font-semibold text-blue-700 hover:text-blue-900"
+                            className="mt-3 inline-flex text-sm font-semibold text-orange-700 hover:text-orange-900"
                           >
                             Ver todo el historial de este equipo
                           </Link>
