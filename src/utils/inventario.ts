@@ -14,7 +14,7 @@ type Obligatorios = {
 
 type Catalogos = {
   categorias: { id: string; nombre: string }[]
-  ambientes: { id: string; codigo: string }[]
+  ambientes: { id: string; codigo: string; nombre?: string; tipo?: string }[]
 }
 
 export function normalizarTexto(valor: string) {
@@ -50,7 +50,7 @@ export function prepararFilaImportacion(valores: Record<string, string>, catalog
   }
   const categorias = catalogos.categorias.filter((c) => normalizarTexto(c.nombre) === normalizarTexto(valores.categoria))
   if (categorias.length !== 1) throw new Error(`Categoría inexistente o ambigua: ${valores.categoria}.`)
-  const ambientes = catalogos.ambientes.filter((a) => normalizarTexto(a.codigo) === normalizarTexto(valores.ambiente_codigo))
+  const ambientes = catalogos.ambientes.filter((a) => normalizarTexto(a.codigo) === normalizarTexto(valores.ambiente_codigo) || (a.tipo === 'oficina' && normalizarTexto(a.nombre ?? '') === normalizarTexto(valores.ambiente_codigo)))
   if (ambientes.length !== 1) throw new Error(`Ambiente inválido, inactivo o ambiguo: ${valores.ambiente_codigo}.`)
   const entrada = normalizarTexto(valores.estado_operativo).replace(/ /g, '_')
   const estado = entrada === 'operativo_con_observaciones' ? 'con_fallas' : entrada

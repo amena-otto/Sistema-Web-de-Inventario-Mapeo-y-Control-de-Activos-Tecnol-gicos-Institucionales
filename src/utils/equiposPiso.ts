@@ -38,7 +38,7 @@ export type RespuestaEquiposPiso = {
 }
 
 export function idsAmbientesDelPiso(
-  ambientes: readonly { id: string; piso_id: string }[],
+  ambientes: readonly { id: string; piso_id: string | null }[],
   pisoId: string,
 ): string[] {
   if (!pisoId) return []

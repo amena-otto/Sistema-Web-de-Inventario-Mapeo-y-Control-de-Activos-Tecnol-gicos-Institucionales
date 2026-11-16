@@ -1,3 +1,4 @@
+import { esOficina, nombreUbicacion } from '../utils/ubicaciones'
 import { prepararCsvInventario, leerArchivoCsv, analizarImportacionCsv, identificadoresCsv, type AnalisisImportacionCsv, type FilaImportacionCsv } from '../utils/csvInventario'
 import { columnasImportacion } from '../utils/inventario'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -330,7 +331,7 @@ export default function Reportes() {
   }, [])
 
   const pabellones = useMemo(
-    () => [...new Map(ambientes.map((ambiente) => [ambiente.pabellon_id, ambiente.pabellon])).entries()]
+    () => [...new Map(ambientes.filter((a) => !esOficina(a) && a.pabellon_id).map((ambiente) => [ambiente.pabellon_id, ambiente.pabellon])).entries()]
       .map(([id, nombre]) => ({ id, nombre }))
       .sort((a, b) => a.nombre.localeCompare(b.nombre)),
     [ambientes],
@@ -338,7 +339,7 @@ export default function Reportes() {
   const pisos = useMemo(
     () => [...new Map(
       ambientes
-        .filter((ambiente) => !pabellonId || ambiente.pabellon_id === pabellonId)
+        .filter((ambiente) => !esOficina(ambiente) && ambiente.piso_id && (!pabellonId || ambiente.pabellon_id === pabellonId))
         .map((ambiente) => [ambiente.piso_id, ambiente.piso]),
     ).entries()]
       .map(([id, nombre]) => ({ id, nombre }))
@@ -673,9 +674,9 @@ export default function Reportes() {
             Modelo: equipo.modelo ?? '',
             'Número de serie': equipo.numero_serie ?? '',
             'Código patrimonial': equipo.codigo_patrimonial ?? '',
-            Pabellón: ambiente?.pabellon ?? '',
-            Piso: ambiente?.piso ?? '',
-            'Código de ambiente': ambiente?.codigo ?? '',
+            Pabellón: ambiente && !esOficina(ambiente) ? ambiente.pabellon : '',
+            Piso: ambiente && !esOficina(ambiente) ? ambiente.piso : '',
+            'Código de ambiente': ambiente && !esOficina(ambiente) ? ambiente.codigo : '',
             Ambiente: ambiente?.nombre ?? '',
             Posición: equipo.posicion ?? '',
             'Estado operativo': estadosLabel[equipo.estado_operativo] ?? equipo.estado_operativo,
@@ -789,7 +790,7 @@ export default function Reportes() {
                 Ambiente
                 <select value={ambienteId} onChange={(event) => setAmbienteId(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5">
                   <option value="">Todos</option>
-                  {ambientesFiltrados.map((ambiente) => <option key={ambiente.id} value={ambiente.id}>{ambiente.codigo} — {ambiente.nombre}</option>)}
+                  {ambientesFiltrados.map((ambiente) => <option key={ambiente.id} value={ambiente.id}>{nombreUbicacion(ambiente)}</option>)}
                 </select>
               </label>
             </>

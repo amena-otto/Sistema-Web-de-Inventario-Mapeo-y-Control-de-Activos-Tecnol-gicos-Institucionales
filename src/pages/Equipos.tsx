@@ -1,3 +1,5 @@
+import { nombreUbicacion, iconoCategoria } from '../utils/ubicaciones'
+import IconoInventario from '../components/IconoInventario'
 import { validarEquipo } from '../utils/inventario'
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
@@ -567,7 +569,7 @@ export default function Equipos() {
     setCargandoDatosEdicion(false)
     setErrorDatosEdicion('')
     setErroresCampos({})
-    setDatos({ ...vacio, categoria_id: categorias[0]?.id ?? '' })
+    setDatos({ ...vacio, categoria_id: categorias[0]?.id ?? '', ambiente_id: ambientes.some((a) => a.id === ambienteFiltro) ? ambienteFiltro : null })
     setTecnicas({})
     setDuplicados([])
     setError('')
@@ -1274,7 +1276,7 @@ export default function Equipos() {
           <option value="">Todas las ubicaciones</option>
           {ambientes.map((ambiente) => (
             <option key={ambiente.id} value={ambiente.id}>
-              {ambiente.pabellon} / {ambiente.piso} / {ambiente.codigo} — {ambiente.nombre}
+              {nombreUbicacion(ambiente)}
             </option>
           ))}
         </select>
@@ -1432,13 +1434,13 @@ export default function Equipos() {
                 <dl className="grid min-w-0 gap-2 rounded-lg bg-slate-50 p-3 text-xs sm:grid-cols-2">
                   <div className="min-w-0">
                     <dt className="text-slate-500">Categoría</dt>
-                    <dd className="mt-0.5 break-words font-medium text-slate-800">{categoriasPorId.get(equipo.categoria_id) ?? '—'}</dd>
+                    <dd className="mt-0.5 break-words font-medium text-slate-800"><IconoInventario nombre={iconoCategoria(categoriasPorId.get(equipo.categoria_id) ?? '')} className="mr-1 inline h-4 w-4 text-blue-700" />{categoriasPorId.get(equipo.categoria_id) ?? '—'}</dd>
                   </div>
                   <div className="min-w-0">
                     <dt className="text-slate-500">Ubicación</dt>
                     <dd className="mt-0.5 break-words font-medium text-slate-800">
                       {ambiente
-                        ? `${ambiente.pabellon} / ${ambiente.piso} / ${ambiente.codigo}`
+                        ? nombreUbicacion(ambiente)
                         : 'Sin ubicación'}
                     </dd>
                   </div>
@@ -1509,13 +1511,13 @@ export default function Equipos() {
                         {equipo.marca ?? 'Sin marca'} · {equipo.modelo ?? 'Sin modelo'}
                       </p>
                       <p className="mt-0.5 break-words text-xs text-slate-500">
-                        {categoriasPorId.get(equipo.categoria_id) ?? 'Sin categoría'}
+                        <IconoInventario nombre={iconoCategoria(categoriasPorId.get(equipo.categoria_id) ?? '')} className="mr-1 inline h-4 w-4 text-blue-700" />{categoriasPorId.get(equipo.categoria_id) ?? 'Sin categoría'}
                       </p>
                     </td>
                     <td className="min-w-0 px-3 py-4 text-slate-700">
                       <p className="break-words">
                         {ambiente
-                          ? `${ambiente.pabellon} / ${ambiente.piso} / ${ambiente.codigo}`
+                          ? nombreUbicacion(ambiente)
                           : 'Sin ubicación'}
                       </p>
                       {equipo.posicion && <p className="mt-0.5 break-words text-xs text-slate-500">{equipo.posicion}</p>}
@@ -1712,7 +1714,7 @@ export default function Equipos() {
                       <span className="font-semibold text-slate-700">Ubicación <span className="text-orange-600">*</span></span>
                       <select required aria-invalid={Boolean(erroresCampos.ambiente_id)} aria-describedby={erroresCampos.ambiente_id ? 'error-ambiente_id' : undefined} value={datos.ambiente_id ?? ''} onChange={(e) => cambiarDato('ambiente_id', e.target.value || null)} className="mt-1 w-full rounded border border-slate-300 px-3 py-2">
                         <option value="">Sin ubicación asignada</option>
-                        {ambientes.map((item) => <option key={item.id} value={item.id}>{item.pabellon} / {item.piso} / {item.codigo} — {item.nombre}</option>)}
+                        {ambientes.map((item) => <option key={item.id} value={item.id}>{nombreUbicacion(item)}</option>)}
                       </select>
                       {erroresCampos.ambiente_id && <span id="error-ambiente_id" role="alert" className="block text-sm text-red-700">{erroresCampos.ambiente_id}</span>}
                     </label>
@@ -2038,7 +2040,7 @@ export default function Equipos() {
                   <div><dt className="text-slate-500">Número de serie</dt><dd className="font-medium">{equipoDetalle.numero_serie ?? '—'}</dd></div>
                   <div><dt className="text-slate-500">Código patrimonial</dt><dd className="font-medium">{equipoDetalle.codigo_patrimonial ?? '—'}</dd></div>
                   <div><dt className="text-slate-500">Estado operativo</dt><dd className="font-medium">{equipoDetalle.situacion === 'baja' ? 'Dado de baja' : etiquetasEstado[equipoDetalle.estado_operativo]}</dd></div>
-                  <div><dt className="text-slate-500">Ubicación / posición</dt><dd className="font-medium">{equipoDetalle.ambiente_id ? ubicacionDetalle ? `${ubicacionDetalle.pabellon} / ${ubicacionDetalle.piso} / ${ubicacionDetalle.codigo} — ${ubicacionDetalle.nombre}${ubicacionDetalle.activo ? '' : ' (inactivo)'}` : ambientesPorId.get(equipoDetalle.ambiente_id)?.nombre ?? 'Ubicación no disponible' : 'Sin ubicación'}{equipoDetalle.posicion ? ` / ${equipoDetalle.posicion}` : ''}</dd></div>
+                  <div><dt className="text-slate-500">Ubicación / posición</dt><dd className="font-medium">{equipoDetalle.ambiente_id ? ubicacionDetalle ? `${nombreUbicacion(ubicacionDetalle)}${ubicacionDetalle.activo ? '' : ' (inactivo)'}` : ambientesPorId.get(equipoDetalle.ambiente_id)?.nombre ?? 'Ubicación no disponible' : 'Sin ubicación'}{equipoDetalle.posicion ? ` / ${equipoDetalle.posicion}` : ''}</dd></div>
                   <div><dt className="text-slate-500">Responsable</dt><dd className="font-medium">{equipoDetalle.responsable_id ? responsablesPorId.get(equipoDetalle.responsable_id) ?? 'No visible' : 'Sin asignar'}</dd></div>
                   <div><dt className="text-slate-500">Adquisición / garantía</dt><dd className="font-medium">{fechaCorta(equipoDetalle.fecha_adquisicion)} / {fechaCorta(equipoDetalle.fecha_garantia)}</dd></div>
                   {puedeVerMantenimientos && <div><dt className="text-slate-500">Último mantenimiento registrado</dt><dd className="font-medium">{fechaUltimoMantenimiento ? new Date(fechaUltimoMantenimiento).toLocaleDateString() : 'Sin mantenimientos'}</dd></div>}

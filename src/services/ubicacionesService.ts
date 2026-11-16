@@ -26,8 +26,9 @@ export type Piso = {
 
 export type AmbienteUbicacion = {
   id: string
-  piso_id: string
-  codigo: string
+  piso_id: string | null
+  codigo: string | null
+  icono?: string | null
   nombre: string
   tipo: string
   descripcion: string | null
@@ -55,7 +56,7 @@ export async function listarPisos(): Promise<Piso[]> {
 export async function listarAmbientes(): Promise<AmbienteUbicacion[]> {
   const { data, error } = await supabase
     .from('ambientes')
-    .select('id, piso_id, codigo, nombre, tipo, descripcion, activo')
+    .select('*')
     .order('codigo')
   if (error) throw error
   return data as AmbienteUbicacion[]
@@ -92,7 +93,7 @@ export async function guardarPiso(
 export async function guardarAmbiente(
   datos: Pick<
     AmbienteUbicacion,
-    'piso_id' | 'codigo' | 'nombre' | 'tipo' | 'descripcion' | 'activo'
+    'piso_id' | 'codigo' | 'nombre' | 'tipo' | 'descripcion' | 'activo' | 'icono'
   >,
   id?: string,
 ) {
@@ -100,7 +101,7 @@ export async function guardarAmbiente(
     ? supabase.from('ambientes').update(datos).eq('id', id)
     : supabase.from('ambientes').insert(datos)
   const { data, error } = await consulta
-    .select('id, piso_id, codigo, nombre, tipo, descripcion, activo')
+    .select('*')
     .single()
   if (error) throw error
   return data as AmbienteUbicacion
