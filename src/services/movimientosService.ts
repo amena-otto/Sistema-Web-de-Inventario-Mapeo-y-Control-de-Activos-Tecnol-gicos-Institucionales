@@ -1,3 +1,4 @@
+import { nombreUbicacion, esOficina } from '../utils/ubicaciones'
 import { supabase } from './supabaseClient'
 import type { AmbienteUbicacion } from './ubicacionesService'
 
@@ -91,7 +92,7 @@ export async function listarAmbientesMovimiento(): Promise<AmbienteMovimiento[]>
   const { data, error } = await supabase
     .from('ambientes')
     .select(
-      'id, piso_id, codigo, nombre, tipo, descripcion, activo, pisos!inner(nombre, pabellones!inner(nombre))',
+      'id, piso_id, codigo, nombre, tipo, descripcion, activo, pisos(nombre, pabellones(nombre))',
     )
     .eq('activo', true)
     .order('codigo')
@@ -106,18 +107,18 @@ export async function listarAmbientesMovimiento(): Promise<AmbienteMovimiento[]>
       tipo: string
       descripcion: string | null
       activo: boolean
-      pisos: { nombre: string; pabellones: { nombre: string } }
+      pisos: null | { nombre: string; pabellones: { nombre: string } }
     }
     return {
       id: fila.id,
       piso_id: fila.piso_id,
-      codigo: fila.codigo,
+      codigo: fila.codigo ?? '',
       nombre: fila.nombre,
-      tipo: fila.tipo,
+      tipo: esOficina({ tipo: fila.tipo, pabellon: fila.pisos?.pabellones.nombre }) ? 'oficina' : fila.tipo,
       descripcion: fila.descripcion,
       activo: fila.activo,
-      piso: fila.pisos.nombre,
-      pabellon: fila.pisos.pabellones.nombre,
+      piso: fila.pisos?.nombre ?? '',
+      pabellon: fila.pisos?.pabellones.nombre ?? '',
     }
   })
 }
@@ -165,6 +166,6 @@ export function etiquetaUbicacion(
   if (!ambienteId) return 'Sin ubicación'
   const ambiente = ambientes.find((item) => item.id === ambienteId)
   return ambiente
-    ? `${ambiente.pabellon} / ${ambiente.piso} / ${ambiente.codigo} — ${ambiente.nombre}`
+    ? nombreUbicacion(ambiente)
     : 'Ubicación no disponible'
 }

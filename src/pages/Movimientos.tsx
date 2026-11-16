@@ -1,3 +1,4 @@
+import { nombreUbicacion } from '../utils/ubicaciones'
 import { useEffect, useState, type FormEvent } from 'react'
 import { usePermissions } from '../hooks/usePermissions'
 import SearchableSelect from '../components/SearchableSelect'
@@ -525,7 +526,7 @@ export default function Movimientos() {
                         )}
                         {ambientes.map((ambiente) => (
                           <option key={ambiente.id} value={ambiente.id}>
-                            {ambiente.pabellon} / {ambiente.piso} / {ambiente.codigo} — {ambiente.nombre}
+                            {nombreUbicacion(ambiente)}
                           </option>
                         ))}
                       </select>

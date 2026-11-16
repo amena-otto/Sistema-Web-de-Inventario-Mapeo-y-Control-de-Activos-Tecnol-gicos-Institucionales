@@ -1,3 +1,4 @@
+import { esOficina } from '../utils/ubicaciones'
 import { supabase } from './supabaseClient'
 
 export type ResumenDashboard = {
@@ -12,7 +13,7 @@ export type ResumenDashboard = {
   equiposInoperativos: number
   categorias: { id: string; nombre: string; cantidad: number }[]
   pabellones: { id: string; nombre: string; cantidad: number; ambientesIds: string[] }[]
-  pisos: { id: string; nombre: string; pabellon: string; cantidad: number; ambientesIds: string[] }[]
+  pisos: null | { id: string; nombre: string; pabellon: string; cantidad: number; ambientesIds: string[] }[]
   ubicaciones: {
     id: string
     pabellon: string
@@ -44,10 +45,11 @@ type EquipoDashboard = {
 
 type AmbienteDashboard = {
   id: string
+  tipo: string
   codigo: string
   nombre: string
   activo: boolean
-  pisos: { id: string; nombre: string; pabellones: { id: string; nombre: string } }
+  pisos: null | { id: string; nombre: string; pabellones: { id: string; nombre: string } }
 }
 
 export type FiltrosDashboard = {
@@ -129,27 +131,31 @@ export async function obtenerResumenDashboard(
   const [ambientesResult, categoriasResult] = await Promise.all([
     supabase
       .from('ambientes')
-      .select('id, codigo, nombre, activo, pisos!inner(id, nombre, pabellones!inner(id, nombre))'),
+      .select('id, codigo, nombre, tipo, activo, pisos(id, nombre, pabellones(id, nombre))'),
     supabase.from('categorias_equipos').select('id, nombre'),
   ])
   if (ambientesResult.error) throw ambientesResult.error
   if (categoriasResult.error) throw categoriasResult.error
 
-  const ambientes = (ambientesResult.data ?? []) as unknown as AmbienteDashboard[]
+  const ambientes = ((ambientesResult.data ?? []) as unknown as AmbienteDashboard[]).map((a) => ({
+    ...a, codigo: a.codigo ?? '',
+    pisos: esOficina({ tipo: a.tipo, pabellon: a.pisos?.pabellones.nombre }) ? null : a.pisos,
+  }))
   const ambientesPorId = new Map(ambientes.map((ambiente) => [ambiente.id, ambiente]))
   const pabellonesMap = new Map<string, string>()
   const pisosMap = new Map<string, { nombre: string; pabellonId: string }>()
   for (const ambiente of ambientes) {
-    pabellonesMap.set(ambiente.pisos.pabellones.id, ambiente.pisos.pabellones.nombre)
-    pisosMap.set(ambiente.pisos.id, {
-      nombre: ambiente.pisos.nombre,
-      pabellonId: ambiente.pisos.pabellones.id,
+    if (!ambiente.pisos) continue
+    pabellonesMap.set(ambiente.pisos?.pabellones.id, ambiente.pisos?.pabellones.nombre)
+    pisosMap.set(ambiente.pisos?.id, {
+      nombre: ambiente.pisos?.nombre,
+      pabellonId: ambiente.pisos?.pabellones.id,
     })
   }
 
   const ambientesFiltrados = ambientes.filter((ambiente) =>
-    (!filtros.pabellonId || ambiente.pisos.pabellones.id === filtros.pabellonId) &&
-    (!filtros.pisoId || ambiente.pisos.id === filtros.pisoId) &&
+    (!filtros.pabellonId || ambiente.pisos?.pabellones.id === filtros.pabellonId) &&
+    (!filtros.pisoId || ambiente.pisos?.id === filtros.pisoId) &&
     (!filtros.ambienteId || ambiente.id === filtros.ambienteId),
   )
   const equiposFiltrados = equipos.filter((equipo) => {
@@ -159,8 +165,8 @@ export async function obtenerResumenDashboard(
       : undefined
     return Boolean(
       ambiente &&
-      (!filtros.pabellonId || ambiente.pisos.pabellones.id === filtros.pabellonId) &&
-      (!filtros.pisoId || ambiente.pisos.id === filtros.pisoId) &&
+      (!filtros.pabellonId || ambiente.pisos?.pabellones.id === filtros.pabellonId) &&
+      (!filtros.pisoId || ambiente.pisos?.id === filtros.pisoId) &&
       (!filtros.ambienteId || ambiente.id === filtros.ambienteId),
     )
   })
@@ -170,17 +176,17 @@ export async function obtenerResumenDashboard(
   }))
   const categoriasPorId = new Map(categorias.map((categoria) => [categoria.id, categoria]))
   const pabellones = [...new Set(
-    ambientesFiltrados.map((ambiente) => ambiente.pisos.pabellones.id),
+    ambientesFiltrados.flatMap((ambiente) => ambiente.pisos ? [ambiente.pisos.pabellones.id] : []),
   )].map((id) => ({
     id,
     nombre: pabellonesMap.get(id) ?? 'Sin pabellón',
     cantidad: 0,
     ambientesIds: ambientesFiltrados
-      .filter((ambiente) => ambiente.pisos.pabellones.id === id)
+      .filter((ambiente) => ambiente.pisos?.pabellones.id === id)
       .map((ambiente) => ambiente.id),
   }))
   const pabellonesPorId = new Map(pabellones.map((pabellon) => [pabellon.id, pabellon]))
-  const pisos = [...new Set(ambientesFiltrados.map((ambiente) => ambiente.pisos.id))]
+  const pisos = [...new Set(ambientesFiltrados.flatMap((ambiente) => ambiente.pisos ? [ambiente.pisos.id] : []))]
     .map((id) => {
       const piso = pisosMap.get(id)
       return {
@@ -189,7 +195,7 @@ export async function obtenerResumenDashboard(
         pabellon: piso ? pabellonesMap.get(piso.pabellonId) ?? 'Sin pabellón' : 'Sin pabellón',
         cantidad: 0,
         ambientesIds: ambientesFiltrados
-          .filter((ambiente) => ambiente.pisos.id === id)
+          .filter((ambiente) => ambiente.pisos?.id === id)
           .map((ambiente) => ambiente.id),
       }
     })
@@ -199,8 +205,8 @@ export async function obtenerResumenDashboard(
       ambiente.id,
       {
         id: ambiente.id,
-        pabellon: ambiente.pisos.pabellones.nombre,
-        piso: ambiente.pisos.nombre,
+        pabellon: ambiente.pisos?.pabellones.nombre ?? 'Áreas académicas',
+        piso: ambiente.pisos?.nombre ?? '',
         codigo: ambiente.codigo,
         ambiente: ambiente.nombre,
         cantidad: 0,
@@ -230,9 +236,9 @@ export async function obtenerResumenDashboard(
     } else {
       const ubicacion = ubicacionesMap.get(ambiente.id)
       if (ubicacion) ubicacion.cantidad += 1
-      const pabellon = pabellonesPorId.get(ambiente.pisos.pabellones.id)
+      const pabellon = pabellonesPorId.get(ambiente.pisos?.pabellones.id ?? '')
       if (pabellon) pabellon.cantidad += 1
-      const piso = pisosPorId.get(ambiente.pisos.id)
+      const piso = pisosPorId.get(ambiente.pisos?.id ?? '')
       if (piso) piso.cantidad += 1
     }
 
@@ -314,20 +320,20 @@ export async function obtenerResumenDashboard(
     equiposSinUbicacion,
     opcionesPabellon: [...pabellonesMap.entries()]
       .filter(([id]) => ambientes.some((ambiente) =>
-        ambiente.activo && ambiente.pisos.pabellones.id === id,
+        ambiente.activo && ambiente.pisos?.pabellones.id === id,
       ))
       .map(([id, nombre]) => ({ id, nombre }))
       .sort((a, b) => a.nombre.localeCompare(b.nombre)),
     opcionesPiso: [...pisosMap.entries()]
       .filter(([id, piso]) =>
         (!filtros.pabellonId || piso.pabellonId === filtros.pabellonId) &&
-        ambientes.some((ambiente) => ambiente.activo && ambiente.pisos.id === id),
+        ambientes.some((ambiente) => ambiente.activo && ambiente.pisos?.id === id),
       )
       .map(([id, piso]) => ({ id, nombre: piso.nombre }))
       .sort((a, b) => a.nombre.localeCompare(b.nombre)),
     opcionesAmbiente: ambientesFiltrados
       .filter((ambiente) =>
-        ambiente.activo && (!filtros.pisoId || ambiente.pisos.id === filtros.pisoId),
+        ambiente.activo && (!filtros.pisoId || ambiente.pisos?.id === filtros.pisoId),
       )
       .map(({ id, codigo, nombre }) => ({ id, codigo, nombre }))
       .sort((a, b) => a.codigo.localeCompare(b.codigo)),

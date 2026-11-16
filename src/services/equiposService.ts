@@ -1,3 +1,4 @@
+import { esOficina } from '../utils/ubicaciones'
 import { FunctionsHttpError } from '@supabase/supabase-js'
 import { supabase } from './supabaseClient'
 
@@ -49,6 +50,7 @@ export type Categoria = { id: string; nombre: string }
 export type Ambiente = {
   id: string
   piso_id: string
+  tipo?: string
   pabellon_id: string
   codigo: string
   nombre: string
@@ -56,6 +58,7 @@ export type Ambiente = {
   pabellon: string
 }
 export type UbicacionEquipo = {
+  tipo?: string
   codigo: string
   nombre: string
   activo: boolean
@@ -103,7 +106,7 @@ export async function cargarCatalogos() {
       supabase
         .from('ambientes')
         .select(
-          'id, codigo, nombre, piso_id, pisos!inner(nombre, pabellon_id, pabellones!inner(nombre))',
+          'id, codigo, nombre, tipo, piso_id, pisos(nombre, pabellon_id, pabellones(nombre))',
         )
         .eq('activo', true)
         .order('nombre'),
@@ -121,19 +124,21 @@ export async function cargarCatalogos() {
   const ambientes = (ambientesResult.data ?? []).map((item) => {
     const fila = item as unknown as {
       id: string
-      codigo: string
+      tipo: string
+      codigo: string | null
       nombre: string
       piso_id: string
-      pisos: { nombre: string; pabellon_id: string; pabellones: { nombre: string } }
+      pisos: null | { nombre: string; pabellon_id: string; pabellones: { nombre: string } }
     }
     return {
       id: fila.id,
-      piso_id: fila.piso_id,
-      pabellon_id: fila.pisos.pabellon_id,
-      codigo: fila.codigo,
+      piso_id: fila.piso_id ?? '',
+      pabellon_id: fila.pisos?.pabellon_id ?? '',
+      tipo: esOficina({ tipo: fila.tipo, pabellon: fila.pisos?.pabellones.nombre }) ? 'oficina' : fila.tipo,
+      codigo: fila.codigo ?? '',
       nombre: fila.nombre,
-      piso: fila.pisos.nombre,
-      pabellon: fila.pisos.pabellones.nombre,
+      piso: fila.pisos?.nombre ?? '',
+      pabellon: fila.pisos?.pabellones.nombre ?? '',
     }
   })
 
@@ -326,7 +331,7 @@ export async function listarEquiposParaExportar(filtros: {
     supabase.from('categorias_equipos').select('id, nombre'),
     supabase
       .from('ambientes')
-      .select('id, codigo, nombre, pisos!inner(id, nombre, pabellones!inner(id, nombre))'),
+      .select('id, codigo, nombre, tipo, pisos(id, nombre, pabellones(id, nombre))'),
   ])
   if (categoriasResult.error) throw categoriasResult.error
   if (ambientesResult.error) throw ambientesResult.error
@@ -334,18 +339,20 @@ export async function listarEquiposParaExportar(filtros: {
   const ambientes = (ambientesResult.data ?? []).map((item) => {
     const fila = item as unknown as {
       id: string
-      codigo: string
+      tipo: string
+      codigo: string | null
       nombre: string
-      pisos: { id: string; nombre: string; pabellones: { id: string; nombre: string } }
+      pisos: null | { id: string; nombre: string; pabellones: { id: string; nombre: string } }
     }
     return {
       id: fila.id,
-      piso_id: fila.pisos.id,
-      pabellon_id: fila.pisos.pabellones.id,
-      codigo: fila.codigo,
+      piso_id: fila.pisos?.id ?? '',
+      pabellon_id: fila.pisos?.pabellones.id ?? '',
+      tipo: esOficina({ tipo: fila.tipo, pabellon: fila.pisos?.pabellones.nombre }) ? 'oficina' : fila.tipo,
+      codigo: fila.codigo ?? '',
       nombre: fila.nombre,
-      piso: fila.pisos.nombre,
-      pabellon: fila.pisos.pabellones.nombre,
+      piso: fila.pisos?.nombre ?? '',
+      pabellon: fila.pisos?.pabellones.nombre ?? '',
     }
   })
 
@@ -523,7 +530,7 @@ export async function obtenerDatosDetalleEquipo(
     ambienteId
       ? supabase
           .from('ambientes')
-          .select('codigo, nombre, activo, pisos!inner(nombre, pabellones!inner(nombre))')
+          .select('codigo, nombre, tipo, activo, pisos(nombre, pabellones(nombre))')
           .eq('id', ambienteId)
           .maybeSingle()
       : Promise.resolve({ data: null, error: null }),
@@ -534,18 +541,20 @@ export async function obtenerDatosDetalleEquipo(
   if (ubicacionResult.error) throw ubicacionResult.error
 
   const ubicacionFila = ubicacionResult.data as unknown as {
-    codigo: string
+    tipo: string
+    codigo: string | null
     nombre: string
     activo: boolean
-    pisos: { nombre: string; pabellones: { nombre: string } }
+    pisos: null | { nombre: string; pabellones: { nombre: string } }
   } | null
   const ubicacion = ubicacionFila
     ? {
-        codigo: ubicacionFila.codigo,
+        tipo: esOficina({ tipo: ubicacionFila.tipo, pabellon: ubicacionFila.pisos?.pabellones.nombre }) ? 'oficina' : ubicacionFila.tipo,
+        codigo: ubicacionFila.codigo ?? '',
         nombre: ubicacionFila.nombre,
         activo: ubicacionFila.activo,
-        piso: ubicacionFila.pisos.nombre,
-        pabellon: ubicacionFila.pisos.pabellones.nombre,
+        piso: ubicacionFila.pisos?.nombre ?? '',
+        pabellon: ubicacionFila.pisos?.pabellones.nombre ?? '',
       }
     : null
 

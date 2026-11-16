@@ -1,7 +1,9 @@
+import IconoInventario from '../components/IconoInventario'
+import { esOficina, nombreUbicacion, sugerirIcono, iconosUbicacion, iconoCategoria } from '../utils/ubicaciones'
 import { filtrarEquiposUbicacion, etiquetasEstadoUbicacion as etiquetaEstado } from '../utils/busquedaEquiposUbicacion'
 import { idsAmbientesDelPiso, registrarErrorSupabase } from '../utils/equiposPiso'
 import { desplazarAlInicioDeListado } from '../utils/desplazamiento'
-import { validarEquipo } from '../utils/inventario'
+import { validarEquipo, normalizarTexto } from '../utils/inventario'
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { usePermissions } from '../hooks/usePermissions'
@@ -44,6 +46,8 @@ export default function Ubicaciones() {
   const { can } = usePermissions()
   const puedeAdministrar = can('ubicaciones.administrar')
   const puedeEditarEquipo = can('equipos.editar')
+  const [seccion, setSeccion] = useState<'areas' | 'pabellones'>('areas')
+  const [icono, setIcono] = useState('')
   const [pabellones, setPabellones] = useState<Pabellon[]>([])
   const [pisos, setPisos] = useState<Piso[]>([])
   const [ambientes, setAmbientes] = useState<AmbienteUbicacion[]>([])
@@ -117,9 +121,14 @@ export default function Ubicaciones() {
     }
   }, [])
 
+  const esArea = (ambiente: AmbienteUbicacion) => esOficina({
+    tipo: ambiente.tipo,
+    pabellon: pabellones.find((p) => p.id === pisos.find((pi) => pi.id === ambiente.piso_id)?.pabellon_id)?.nombre,
+  })
+  const pabellonesFisicos = pabellones.filter((p) => !esOficina({ pabellon: p.nombre }))
   const pabellonActual =
-    pabellones.find((pabellon) => pabellon.id === pabellonElegido) ??
-    pabellones.find((pabellon) => pabellon.activo)
+    pabellonesFisicos.find((pabellon) => pabellon.id === pabellonElegido) ??
+    pabellonesFisicos.find((pabellon) => pabellon.activo)
   const pisosPabellon = pisos.filter(
     (piso) => piso.pabellon_id === pabellonActual?.id,
   )
@@ -128,12 +137,12 @@ export default function Ubicaciones() {
     pisosPabellon.find((piso) => piso.activo)
   const pisoIdActual = `${pisoActual?.id ?? ''}`
   const ambientesPiso = ambientes.filter(
-    (ambiente) => ambiente.piso_id === pisoActual?.id,
+    (ambiente) => seccion === 'areas' ? esArea(ambiente) : ambiente.piso_id === pisoActual?.id && !esArea(ambiente),
   )
   const ambientesVisibles = ambientesPiso.filter((ambiente) => ambiente.activo)
   const ambienteIdsPiso = useMemo(
-    () => idsAmbientesDelPiso(ambientes, pisoIdActual),
-    [ambientes, pisoIdActual],
+    () => seccion === 'areas' ? ambientes.filter((a) => esOficina({ tipo: a.tipo, pabellon: pabellones.find((p) => p.id === pisos.find((pi) => pi.id === a.piso_id)?.pabellon_id)?.nombre })).map((a) => a.id) : idsAmbientesDelPiso(ambientes.filter((a) => a.tipo !== 'oficina'), pisoIdActual),
+    [ambientes, pisoIdActual, seccion, pabellones, pisos],
   )
   const equiposVisibles = useMemo(
     () => filtrarEquiposUbicacion(equipos, busqueda, ambienteElegido, ambienteIdsPiso),
@@ -164,7 +173,6 @@ export default function Ubicaciones() {
   }, [equipos])
 
   useEffect(() => {
-    if (!pisoIdActual) return
 
     let vigente = true
     Promise.all([
@@ -250,7 +258,8 @@ export default function Ubicaciones() {
       setPisoFormulario(item?.piso_id ?? pisoActual?.id ?? '')
       setCodigoAmbiente(item?.codigo ?? '')
       setNombre(item?.nombre ?? '')
-      setTipoAmbiente(item?.tipo ?? 'aula')
+      setTipoAmbiente(item && esArea(item) ? 'oficina' : item?.tipo ?? (seccion === 'areas' ? 'oficina' : 'aula'))
+      setIcono(item?.icono ?? '')
       setDescripcion(item?.descripcion ?? '')
     }
   }
@@ -278,10 +287,15 @@ export default function Ubicaciones() {
         )
         setPabellonElegido(pisoFormulario)
       } else {
+        if (tipoAmbiente === 'oficina' && ambientes.some((a) => a.id !== editandoId && esArea(a) && normalizarTexto(a.nombre) === normalizarTexto(nombre))) {
+          throw new Error('Ya existe una oficina o área con ese nombre.')
+        }
         await guardarAmbiente(
           {
-            piso_id: pisoFormulario,
-            codigo: codigoAmbiente.trim(),
+            // Legacy offices retain their original physical links and code when edited.
+            piso_id: tipoAmbiente === 'oficina' ? (editandoId ? ambientes.find((a) => a.id === editandoId)?.piso_id ?? null : null) : pisoFormulario,
+            codigo: tipoAmbiente === 'oficina' ? (editandoId ? ambientes.find((a) => a.id === editandoId)?.codigo ?? null : null) : codigoAmbiente.trim(),
+            icono: icono || sugerirIcono(nombre, tipoAmbiente),
             nombre: nombre.trim(),
             tipo: tipoAmbiente.trim(),
             descripcion: descripcion.trim() || null,
@@ -290,6 +304,7 @@ export default function Ubicaciones() {
           editandoId ?? undefined,
         )
         setPisoElegido(pisoFormulario)
+        setSeccion(tipoAmbiente === 'oficina' ? 'areas' : 'pabellones')
       }
 
       const [datosPabellones, datosPisos, datosAmbientes] = await Promise.all([
@@ -361,14 +376,14 @@ export default function Ubicaciones() {
         <div>
           <h2 className="text-2xl font-semibold">Ubicaciones institucionales</h2>
           <p className="mt-1 text-sm text-slate-600">
-            Explora pabellones, pisos y ambientes, y consulta los equipos de cada ubicación.
+            Explora las áreas académicas o los pabellones y consulta sus equipos.
           </p>
         </div>
         {puedeAdministrar && (
           <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={() => abrirFormulario('pabellon')} className="rounded border border-slate-300 bg-white px-3 py-2 text-sm">Agregar pabellón</button>
-            <button type="button" disabled={!pabellonActual} onClick={() => abrirFormulario('piso')} className="rounded border border-slate-300 bg-white px-3 py-2 text-sm disabled:opacity-50">Agregar piso</button>
-            <button type="button" disabled={!pisoActual} onClick={() => abrirFormulario('ambiente')} className="rounded bg-blue-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">Agregar ambiente</button>
+            <button type="button" hidden={seccion === 'areas'} onClick={() => abrirFormulario('pabellon')} className="rounded border border-slate-300 bg-white px-3 py-2 text-sm">Agregar pabellón</button>
+            <button type="button" hidden={seccion === 'areas'} disabled={!pabellonActual} onClick={() => abrirFormulario('piso')} className="rounded border border-slate-300 bg-white px-3 py-2 text-sm disabled:opacity-50">Agregar piso</button>
+            <button type="button" onClick={() => abrirFormulario('ambiente')} className="rounded bg-blue-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">{seccion === 'areas' ? 'Agregar oficina / área' : 'Agregar ambiente'}</button>
           </div>
         )}
       </div>
@@ -376,10 +391,14 @@ export default function Ubicaciones() {
       {error && <p role="alert" className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}
       {aviso && <p role="status" className="mt-4 rounded-lg bg-green-50 p-3 text-sm text-green-700">{aviso}</p>}
 
+      <nav aria-label="Tipo de ubicación" className="mt-5 flex flex-wrap gap-3">
+        {(['areas', 'pabellones'] as const).map((valor) => <button key={valor} type="button" aria-pressed={seccion === valor} onClick={() => { setSeccion(valor); setAmbienteElegido(''); setBusqueda(''); setPaginaEquipos(1) }} className={`flex items-center gap-3 rounded-xl border px-5 py-4 text-left font-semibold ${seccion === valor ? 'border-blue-500 bg-blue-50 text-blue-900' : 'border-slate-200 bg-white text-slate-700'}`}><IconoInventario nombre={valor === 'areas' ? 'oficina' : 'aula'} />{valor === 'areas' ? 'Áreas académicas' : 'Pabellones'}</button>)}
+      </nav>
+      {seccion === 'pabellones' && (
       <div className="mt-5 grid gap-3 rounded-xl bg-white p-4 shadow md:grid-cols-3">
         <label className="text-sm font-medium">Pabellón
           <select value={pabellonActual?.id ?? ''} onChange={(event) => elegirPabellon(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2">
-            {pabellones.filter((item) => item.activo || puedeAdministrar).map((item) => <option key={item.id} value={item.id}>{item.nombre}{item.activo ? '' : ' (inactivo)'}</option>)}
+            {pabellonesFisicos.filter((item) => item.activo || puedeAdministrar).map((item) => <option key={item.id} value={item.id}>{item.nombre}{item.activo ? '' : ' (inactivo)'}</option>)}
           </select>
         </label>
         <label className="text-sm font-medium">Piso
@@ -395,20 +414,22 @@ export default function Ubicaciones() {
         </label>
       </div>
 
-      {puedeAdministrar && pabellonActual && (
+      )}
+
+      {puedeAdministrar && (seccion === 'areas' || pabellonActual) && (
         <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
           <span className="mr-1 text-slate-500">Editar estructura:</span>
-          <button type="button" onClick={() => abrirFormulario('pabellon', pabellonActual)} className="rounded border border-slate-300 px-3 py-1.5">Pabellón</button>
-          {pisoActual && <button type="button" onClick={() => abrirFormulario('piso', pisoActual)} className="rounded border border-slate-300 px-3 py-1.5">Piso</button>}
+          <button hidden={seccion === 'areas' || !pabellonActual} type="button" onClick={() => abrirFormulario('pabellon', pabellonActual)} className="rounded border border-slate-300 px-3 py-1.5">Pabellón</button>
+          {seccion === 'pabellones' && pisoActual && <button type="button" onClick={() => abrirFormulario('piso', pisoActual)} className="rounded border border-slate-300 px-3 py-1.5">Piso</button>}
           {ambientesPiso.map((ambiente) => (
             <button key={ambiente.id} type="button" onClick={() => abrirFormulario('ambiente', ambiente)} className="rounded border border-slate-300 px-3 py-1.5">
-              Ambiente {ambiente.codigo}{ambiente.activo ? '' : ' (inactivo)'}
+              {ambiente.nombre}{ambiente.activo ? '' : ' (inactivo)'}
             </button>
           ))}
         </div>
       )}
 
-      {pabellonActual && (
+      {seccion === 'pabellones' && pabellonActual && (
         <div className="mt-4 flex flex-wrap gap-2">
           {pisosPabellon.filter((piso) => piso.activo).map((piso) => (
             <button key={piso.id} type="button" onClick={() => elegirPiso(piso.id)} className={`rounded-full px-4 py-2 text-sm font-medium ${pisoActual?.id === piso.id ? 'bg-blue-600 text-white' : 'border border-slate-300 bg-white text-slate-700'}`}>
@@ -418,17 +439,17 @@ export default function Ubicaciones() {
         </div>
       )}
 
-      {!cargando && (!pabellones.length || !pisos.length) && (
+      {seccion === 'pabellones' && !cargando && (!pabellonesFisicos.length || !pisos.length) && (
         <p className="mt-4 rounded-lg bg-amber-50 p-4 text-sm text-amber-900">
-          Aún no hay estructura institucional configurada. Un administrador puede crear pabellones, pisos y ambientes con los botones superiores.
+          Aún no hay estructura de pabellones configurada. Un administrador puede crear pabellones, pisos y ambientes con los botones superiores.
         </p>
       )}
 
-      {pisoActual && (
+      {(seccion === 'areas' || pisoActual) && (
         <>
           <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <article className="rounded-xl bg-white p-4 shadow">
-              <p className="text-sm text-slate-500">Equipos activos en el piso</p>
+              <p className="text-sm text-slate-500">Equipos activos {seccion === 'areas' ? 'en áreas académicas' : 'en el piso'}</p>
               <p className="mt-1 text-2xl font-semibold">{equipos.filter((item) => item.situacion === 'activo').length}</p>
             </article>
             {(['operativo', 'con_fallas', 'en_mantenimiento', 'inoperativo', 'en_almacen'] as const).map((estado) => (
@@ -441,21 +462,21 @@ export default function Ubicaciones() {
 
           <div className="mt-5">
             <section className="rounded-xl bg-white p-4 shadow">
-              <h3 className="font-semibold">Ambientes del piso</h3>
+              <h3 className="font-semibold">{seccion === 'areas' ? 'Oficinas y áreas' : 'Ambientes del piso'}</h3>
               {ambientesVisibles.length === 0 ? (
-                <p className="mt-3 text-sm text-slate-500">No hay ambientes activos en este piso.</p>
+                <p className="mt-3 text-sm text-slate-500">No hay ubicaciones activas en esta sección.</p>
               ) : (
-                <ul className="mt-3 space-y-2">
+                <ul className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                   {ambientesVisibles.map((ambiente) => {
                     const lista = equiposPorAmbiente.get(ambiente.id) ?? []
                     return (
                       <li key={ambiente.id}>
                         <button type="button" onClick={() => elegirAmbiente(ambienteElegido === ambiente.id ? '' : ambiente.id)} className={`w-full rounded-lg border p-3 text-left ${ambienteElegido === ambiente.id ? 'border-blue-400 bg-blue-50' : 'border-slate-200 hover:bg-slate-50'}`}>
                           <span className="flex items-center justify-between gap-2">
-                            <span className="font-medium">{ambiente.codigo} · {ambiente.nombre}</span>
+                            <span className="flex items-center gap-3 font-medium"><span className="rounded-lg bg-blue-100 p-2 text-blue-800"><IconoInventario nombre={ambiente.icono || sugerirIcono(ambiente.nombre, esArea(ambiente) ? 'oficina' : ambiente.tipo)} /></span>{!esArea(ambiente) && ambiente.codigo ? `${ambiente.codigo} · ` : ''}{ambiente.nombre}</span>
                             <span className="rounded bg-slate-100 px-2 py-0.5 text-xs">{lista.length} equipos</span>
                           </span>
-                          <span className="mt-1 block text-xs text-slate-500">{ambiente.tipo} · {lista.filter((item) => item.estado_operativo === 'operativo').length} operativos · {lista.filter((item) => item.estado_operativo !== 'operativo').length} con observaciones</span>
+                          <span className="mt-1 block text-xs text-slate-500">{esArea(ambiente) ? 'Oficina / Área' : ambiente.tipo} · {lista.filter((item) => item.estado_operativo === 'operativo').length} operativos · {lista.filter((item) => item.estado_operativo !== 'operativo').length} con observaciones</span>
                         </button>
                       </li>
                     )
@@ -465,6 +486,7 @@ export default function Ubicaciones() {
             </section>
           </div>
 
+          {ambienteElegido && can('equipos.crear') && <Link to={`/equipos?ambiente=${encodeURIComponent(ambienteElegido)}`} className="mt-4 inline-flex rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white">Ver y agregar equipos en {ambientes.find((a) => a.id === ambienteElegido)?.nombre}</Link>}
           <section ref={listadoRef} className="mt-5 min-w-0 scroll-mt-24 rounded-xl bg-white shadow">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b p-4">
               <div>
@@ -529,7 +551,7 @@ export default function Ubicaciones() {
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
                             <p className="break-all text-sm font-bold text-blue-800">{equipo.codigo_institucional}</p>
-                            <h4 className="mt-0.5 break-words font-semibold text-slate-900">{equipo.nombre}</h4>
+                            <h4 className="mt-0.5 break-words font-semibold text-slate-900"><IconoInventario nombre={iconoCategoria(equipo.categoria?.nombre ?? '')} className="mr-2 inline h-5 w-5 text-blue-700" />{equipo.nombre}</h4>
                           </div>
                           <EstadoEquipoBadge estado={equipo.estado_operativo} situacion={equipo.situacion} />
                         </div>
@@ -567,11 +589,11 @@ export default function Ubicaciones() {
                           <tr key={equipo.id} className="border-t align-top">
                             <td className="min-w-0 px-4 py-3 font-semibold text-blue-800"><span className="break-all">{equipo.codigo_institucional}</span></td>
                             <td className="min-w-0 px-4 py-3">
-                              <p className="break-words font-medium text-slate-900">{equipo.nombre}</p>
+                              <p className="break-words font-medium text-slate-900"><IconoInventario nombre={iconoCategoria(equipo.categoria?.nombre ?? '')} className="mr-2 inline h-5 w-5 text-blue-700" />{equipo.nombre}</p>
                               <p className="mt-0.5 break-all text-xs text-slate-700">Serie: {equipo.numero_serie ?? 'Sin serie'}</p>
                               <p className="mt-0.5 break-words text-xs text-slate-500">{equipo.marca ?? 'Sin marca'} · {equipo.modelo ?? 'Sin modelo'}</p>
                             </td>
-                            <td className="min-w-0 px-4 py-3"><span className="break-words">{ambiente ? `${ambiente.codigo} — ${ambiente.nombre}` : '—'}</span></td>
+                            <td className="min-w-0 px-4 py-3"><span className="break-words">{ambiente ? esArea(ambiente) ? ambiente.nombre : [ambiente.codigo, ambiente.nombre].filter(Boolean).join(' — ') : '—'}</span></td>
                             <td className="px-4 py-3"><EstadoEquipoBadge estado={equipo.estado_operativo} situacion={equipo.situacion} /></td>
                             <td className="px-4 py-3"><button type="button" onClick={() => setFicha(equipo)} className="min-h-9 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-blue-800 hover:bg-slate-50">Ver equipo</button></td>
                           </tr>
@@ -607,12 +629,16 @@ export default function Ubicaciones() {
                 {pabellones.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}
               </select>
             </label>}
-            {formulario === 'ambiente' && <label className="mt-4 block text-sm">Piso
+            {formulario === 'ambiente' && <>
+              <label className="mt-4 block text-sm">Tipo de ubicación<select value={tipoAmbiente} onChange={(e) => setTipoAmbiente(e.target.value)} disabled={Boolean(editandoId)} className="mt-1 w-full rounded border border-slate-300 px-3 py-2"><option value="oficina">Oficina / Área</option><option value="aula">Aula</option><option value="laboratorio">Laboratorio</option></select></label>
+              {tipoAmbiente === 'oficina' && <p className="mt-2 text-sm text-slate-600">Se mostrará en Áreas académicas. No requiere pabellón, piso ni código de aula.</p>}
+            </>}
+            {formulario === 'ambiente' && tipoAmbiente !== 'oficina' && <label className="mt-4 block text-sm">Piso
               <select required value={pisoFormulario} onChange={(event) => setPisoFormulario(event.target.value)} className="mt-1 w-full rounded border border-slate-300 px-3 py-2">
-                {pisos.map((item) => <option key={item.id} value={item.id}>{pabellones.find((pabellon) => pabellon.id === item.pabellon_id)?.nombre} — {item.nombre}</option>)}
+                {pisos.filter((pi) => pabellonesFisicos.some((p) => p.id === pi.pabellon_id)).map((item) => <option key={item.id} value={item.id}>{pabellonesFisicos.find((pabellon) => pabellon.id === item.pabellon_id)?.nombre} — {item.nombre}</option>)}
               </select>
             </label>}
-            {formulario === 'ambiente' && <label className="mt-4 block text-sm">Código del ambiente
+            {formulario === 'ambiente' && tipoAmbiente !== 'oficina' && <label className="mt-4 block text-sm">Código del ambiente
               <input required maxLength={40} value={codigoAmbiente} onChange={(event) => setCodigoAmbiente(event.target.value)} className="mt-1 w-full rounded border border-slate-300 px-3 py-2" />
             </label>}
             <label className="mt-4 block text-sm">{formulario === 'pabellon' ? 'Nombre del pabellón' : formulario === 'piso' ? 'Nombre del piso' : 'Nombre del aula, oficina o laboratorio'}
@@ -621,10 +647,8 @@ export default function Ubicaciones() {
             {formulario === 'piso' && <label className="mt-4 block text-sm">Número del piso
               <input type="number" min={0} max={200} value={numeroPiso} onChange={(event) => setNumeroPiso(event.target.value)} className="mt-1 w-full rounded border border-slate-300 px-3 py-2" />
             </label>}
-            {formulario === 'ambiente' && <label className="mt-4 block text-sm">Tipo
-              <select value={tipoAmbiente} onChange={(event) => setTipoAmbiente(event.target.value)} className="mt-1 w-full rounded border border-slate-300 px-3 py-2">
-                <option value="aula">Aula</option><option value="oficina">Oficina</option><option value="laboratorio">Laboratorio</option>
-              </select>
+            {formulario === 'ambiente' && <label className="mt-4 block text-sm">Icono
+              <div className="mt-1 flex items-center gap-3"><IconoInventario nombre={icono || sugerirIcono(nombre, tipoAmbiente)} /><select value={icono} onChange={(e) => setIcono(e.target.value)} className="w-full rounded border border-slate-300 px-3 py-2"><option value="">Automático según nombre y tipo</option>{iconosUbicacion.map((i) => <option key={i} value={i}>{i}</option>)}</select></div>
             </label>}
             {(formulario === 'pabellon' || formulario === 'ambiente') && <label className="mt-4 block text-sm">Descripción
               <textarea rows={2} maxLength={500} value={descripcion} onChange={(event) => setDescripcion(event.target.value)} className="mt-1 w-full rounded border border-slate-300 px-3 py-2" />
@@ -633,7 +657,7 @@ export default function Ubicaciones() {
             <div className="mt-5 flex justify-end gap-2">
               {editandoId && <button type="button" disabled={guardando} onClick={() => void borrarUbicacion()} className="mr-auto rounded border border-red-300 px-4 py-2 text-red-700 hover:bg-red-50 disabled:opacity-60">Eliminar</button>}
               <button type="button" disabled={guardando} onClick={() => setFormulario(null)} className="rounded border border-slate-300 px-4 py-2">Cancelar</button>
-              <button type="submit" disabled={guardando || (formulario === 'piso' && !pabellones.length) || (formulario === 'ambiente' && !pisos.length)} className="rounded bg-blue-600 px-4 py-2 font-semibold text-white disabled:opacity-60">{guardando ? 'Guardando...' : 'Guardar ubicación'}</button>
+              <button type="submit" disabled={guardando || (formulario === 'piso' && !pabellones.length) || (formulario === 'ambiente' && tipoAmbiente !== 'oficina' && !pisos.length)} className="rounded bg-blue-600 px-4 py-2 font-semibold text-white disabled:opacity-60">{guardando ? 'Guardando...' : 'Guardar ubicación'}</button>
             </div>
           </form>
         </div>
@@ -666,30 +690,12 @@ export default function Ubicaciones() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
           <div className="w-full max-w-lg rounded-xl bg-white p-5 shadow-xl">
             <h3 className="text-lg font-semibold">Cambiar ubicación del equipo</h3>
-            <p className="mt-1 text-sm text-slate-600">Selecciona nuevo pabellón, piso y ambiente. Se registrará el movimiento.</p>
+            <p className="mt-1 text-sm text-slate-600">Selecciona una oficina, aula o laboratorio. Se registrará el movimiento.</p>
             <div className="mt-4 space-y-3">
-              <label className="block text-sm">Pabellón
-                <select className="mt-1 w-full rounded border border-slate-300 px-3 py-2" value={cambioUbicacion.pabellonId} onChange={(e) => {
-                  const pabId = e.target.value
-                  setCambioUbicacion((a) => ({ ...a, pabellonId: pabId, pisoId: '', ambienteId: '' }))
-                }}>
-                  <option value="">Selecciona</option>
-                  {pabellones.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
-                </select>
-              </label>
-              <label className="block text-sm">Piso
-                <select className="mt-1 w-full rounded border border-slate-300 px-3 py-2" disabled={!cambioUbicacion.pabellonId} value={cambioUbicacion.pisoId} onChange={(e) => {
-                  const pisoId = e.target.value
-                  setCambioUbicacion((a) => ({ ...a, pisoId, ambienteId: '' }))
-                }}>
-                  <option value="">Selecciona</option>
-                  {pisos.filter((p) => p.pabellon_id === cambioUbicacion.pabellonId).map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
-                </select>
-              </label>
-              <label className="block text-sm">Ambiente
-                <select className="mt-1 w-full rounded border border-slate-300 px-3 py-2" disabled={!cambioUbicacion.pisoId} value={cambioUbicacion.ambienteId} onChange={(e) => setCambioUbicacion((a) => ({ ...a, ambienteId: e.target.value }))}>
-                  <option value="">Selecciona</option>
-                  {catalogoAmbientes.filter((a) => a.piso_id === cambioUbicacion.pisoId).map((a) => <option key={a.id} value={a.id}>{a.codigo} — {a.nombre}</option>)}
+              <label className="block text-sm">Ubicación de destino
+                <select className="mt-1 w-full rounded border border-slate-300 px-3 py-2" value={cambioUbicacion.ambienteId} onChange={(e) => setCambioUbicacion((a) => ({ ...a, ambienteId: e.target.value }))}>
+                  <option value="">Selecciona una oficina, aula o laboratorio</option>
+                  {catalogoAmbientes.map((a) => <option key={a.id} value={a.id}>{nombreUbicacion(a)}</option>)}
                 </select>
               </label>
             </div>
@@ -712,7 +718,7 @@ export default function Ubicaciones() {
                     motivo: 'Traslado desde ubicaciones',
                   })
                   setCambioUbicacion({ abierto: false, equipoId: '', pabellonId: '', pisoId: '', ambienteId: '', guardando: false })
-                  if (pisoIdActual) { const datos = await listarEquiposPiso(ambienteIdsPiso); setEquipos(datos); }
+                  if (seccion === 'areas' || pisoIdActual) { const datos = await listarEquiposPiso(ambienteIdsPiso); setEquipos(datos); }
                 } catch (e) {
                   registrarErrorSupabase('No se pudo cambiar la ubicación', e)
                   setError(mostrarError(e, 'No se pudo cambiar la ubicación.'))
