@@ -94,7 +94,7 @@ export default function EquipoQrDialog({ equipo, equipos, onClose }: Props) {
     <div className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-slate-950/60 p-3 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
       <section id="dialogo-etiquetas" role="dialog" aria-modal="true" aria-labelledby="equipo-qr-titulo" className="my-auto max-h-[calc(100dvh-1.5rem)] w-full max-w-6xl overflow-y-auto rounded-2xl bg-white p-4 shadow-2xl sm:p-6">
         <header className="flex items-start justify-between gap-4">
-          <div><p className="text-xs font-bold uppercase tracking-widest text-blue-800">Instituto Otto Tonsmann</p><h2 id="equipo-qr-titulo" className="mt-1 text-xl font-bold text-slate-900">Etiquetas institucionales QR</h2><p className="mt-1 text-sm text-slate-600">{seleccion.length} equipo(s) · {formato.anchoMm} × {formato.altoMm} mm · A4 horizontal · {formato.columnas} columnas × {formato.filas} filas · hasta {formato.porPagina} etiquetas por hoja</p></div>
+          <div><p className="text-xs font-bold uppercase tracking-widest text-orange-800">Instituto Otto Tonsmann</p><h2 id="equipo-qr-titulo" className="mt-1 text-xl font-bold text-slate-900">Etiquetas institucionales QR</h2><p className="mt-1 text-sm text-slate-600">{seleccion.length} equipo(s) · {formato.anchoMm} × {formato.altoMm} mm · A4 horizontal · {formato.columnas} columnas × {formato.filas} filas · hasta {formato.porPagina} etiquetas por hoja</p></div>
           <button id="cerrar-etiquetas" type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">Cerrar</button>
         </header>
         {error && <p role="alert" className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>}
@@ -120,7 +120,7 @@ export default function EquipoQrDialog({ equipo, equipos, onClose }: Props) {
               <option value={35}>35 mm · compacto</option><option value={40}>40 mm</option><option value={45}>45 mm</option>
             </select>
           </label>
-          <button type="button" onClick={() => void imprimir()} disabled={!etiquetas.length || imprimiendo} className="rounded-lg bg-blue-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{imprimiendo ? 'Preparando impresión…' : etiquetas.length === 1 ? 'Imprimir etiqueta' : `Imprimir ${etiquetas.length} etiquetas`}</button>
+          <button type="button" onClick={() => void imprimir()} disabled={!etiquetas.length || imprimiendo} className="rounded-lg bg-orange-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-orange-800 disabled:opacity-50">{imprimiendo ? 'Preparando impresión…' : etiquetas.length === 1 ? 'Imprimir etiqueta' : `Imprimir ${etiquetas.length} etiquetas`}</button>
           <span className="text-sm text-slate-600">Vista previa: {paginas.length} hoja(s)</span>
         </div>
         <p className="mt-3 text-sm text-slate-600">En el diálogo de impresión elige A4 horizontal, escala 100 % (tamaño real) y desactiva los encabezados y pies del navegador. Las líneas punteadas indican el contorno de recorte de cada etiqueta. Comprueba la vista previa del navegador antes de confirmar.</p>

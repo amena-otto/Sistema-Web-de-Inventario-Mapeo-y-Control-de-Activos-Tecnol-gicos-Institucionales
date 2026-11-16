@@ -348,7 +348,7 @@ export default function Usuarios() {
           <button
             type="submit"
             disabled={creando}
-            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+            className="rounded-lg bg-orange-600 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-700 disabled:opacity-60"
           >
             {creando ? 'Creando...' : 'Crear usuario'}
           </button>
@@ -495,7 +495,7 @@ export default function Usuarios() {
                             type="button"
                             disabled={actualizandoCorreoId !== null || ocupado}
                             onClick={() => void guardarCorreo(u)}
-                            className="self-start rounded-md border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+                            className="self-start rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                           >
                             {actualizandoCorreoId === u.id
                               ? 'Actualizando correo...'
@@ -516,7 +516,7 @@ export default function Usuarios() {
                           value={rolEditado}
                           disabled={ocupado}
                           onChange={(e) => setRolEditado(e.target.value as Rol)}
-                          className="w-full rounded-lg border border-blue-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-100"
                         >
                           <option value="admin">Administrador</option>
                           <option value="tecnico">Técnico</option>
@@ -566,7 +566,7 @@ export default function Usuarios() {
                             type="button"
                             disabled={ocupado || actualizandoCorreoId === u.id || restableciendoId === u.id}
                             onClick={() => void guardarEdicion(u)}
-                            className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                            className="rounded-lg bg-orange-600 px-3 py-2 text-xs font-semibold text-white hover:bg-orange-700 disabled:opacity-60"
                           >
                             {ocupado ? 'Guardando...' : 'Guardar cambios'}
                           </button>
@@ -583,7 +583,7 @@ export default function Usuarios() {
                         <button
                           type="button"
                           onClick={() => empezarEdicion(u)}
-                          className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-100"
+                          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
                         >
                           Editar usuario
                         </button>

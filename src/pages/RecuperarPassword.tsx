@@ -35,10 +35,10 @@ export default function RecuperarPassword() {
             value={correo} onChange={(event) => setCorreo(event.target.value)}
             className="w-full rounded-lg border border-slate-300 px-4 py-3" />
           {mensaje && <p role="status" className="rounded-lg bg-green-50 p-3 text-sm text-green-700">{mensaje}</p>}
-          <button disabled={enviando} className="w-full rounded-lg bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-700 disabled:opacity-60">
+          <button disabled={enviando} className="w-full rounded-lg bg-orange-600 px-4 py-3 font-semibold text-white hover:bg-orange-700 disabled:opacity-60">
             {enviando ? 'Solicitando...' : 'Solicitar recuperación'}
           </button>
-          <Link to="/login" className="block text-center text-sm text-blue-600 hover:underline">Volver al inicio de sesión</Link>
+          <Link to="/login" className="block text-center text-sm text-orange-600 hover:underline">Volver al inicio de sesión</Link>
         </form>
       </section>
     </main>

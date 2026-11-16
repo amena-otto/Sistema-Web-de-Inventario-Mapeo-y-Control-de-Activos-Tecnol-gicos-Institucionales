@@ -1,4 +1,4 @@
-# Respaldo local cifrado para Windows, sin servicios de pago
+Get-Service postgresql*# Respaldo local cifrado para Windows, sin servicios de pago
 
 Este procedimiento usa PostgreSQL, GnuPG y el Programador de tareas de Windows.
 No requiere R2, cuenta de almacenamiento, tarjeta ni suscripcion. No sube archivos

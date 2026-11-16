@@ -1,3 +1,5 @@
+import { listarUsoEquipos, mensajeCompartidos } from '../services/equiposCompartidosService'
+import AreasUsuariasEquipo from '../components/AreasUsuariasEquipo'
 import { nombreUbicacion, iconoCategoria } from '../utils/ubicaciones'
 import IconoInventario from '../components/IconoInventario'
 import { validarEquipo } from '../utils/inventario'
@@ -180,6 +182,10 @@ export default function Equipos() {
   const [datos, setDatos] = useState<DatosEquipo>(vacio)
   const [tecnicas, setTecnicas] = useState<Record<string, string>>({})
   const [duplicados, setDuplicados] = useState<Equipo[]>([])
+  const [vistaEquipos, setVistaEquipos] = useState<'tabla' | 'tarjetas'>('tabla')
+  const [areasPorEquipo, setAreasPorEquipo] = useState<Record<string, string[]>>({})
+  const [errorUsoCompartido, setErrorUsoCompartido] = useState('')
+  const [pestanaDetalle, setPestanaDetalle] = useState('general')
   const [equipoDetalle, setEquipoDetalle] = useState<Equipo | null>(null)
   const [equipoQr, setEquipoQr] = useState<Equipo | null>(null)
   const [seleccionQr, setSeleccionQr] = useState<Map<string, Equipo>>(() => new Map())
@@ -561,6 +567,21 @@ export default function Equipos() {
     setFotoAdicional([...fotoAdicional, ...nuevas.map(crearVistaArchivo)])
   }
 
+  useEffect(() => {
+    let vigente = true
+    listarUsoEquipos(equipos.map((e) => e.id)).then((uso) => {
+      if (vigente) { setAreasPorEquipo(uso); setErrorUsoCompartido('') }
+    }).catch((e: unknown) => {
+      if (vigente) { setAreasPorEquipo({}); setErrorUsoCompartido(mensajeCompartidos(e)) }
+    })
+    return () => { vigente = false }
+  }, [equipos])
+
+  function compartido(equipo: Equipo) {
+    const areas = areasPorEquipo[equipo.id] ?? []
+    return areas.length > 1 || areas.some((id) => id !== equipo.ambiente_id)
+  }
+
   function iniciarNuevo() {
     solicitudEdicion.current += 1
     equipoEdicionIdActual.current = null
@@ -883,6 +904,7 @@ export default function Equipos() {
 
   const abrirDetalle = useCallback(async (equipo: Equipo) => {
     const solicitudActual = ++solicitudDetalle.current
+    if (equipoDetalleIdActual.current !== equipo.id) setPestanaDetalle('general')
     equipoDetalleIdActual.current = equipo.id
     setEquipoDetalle(equipo)
     setDetalleCargando(true)
@@ -1194,6 +1216,7 @@ export default function Equipos() {
         </div>
       </div>
 
+      {errorUsoCompartido && <p role="status" className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{errorUsoCompartido} El listado físico sigue disponible.</p>}
       {puedeDarDeBaja && verEquiposDadosDeBaja && <LimpiezasPendientes />}
       {error && (
         <p role="alert" className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">
@@ -1300,6 +1323,13 @@ export default function Equipos() {
         </select>
       </div>
 
+      {(busqueda || categoriaFiltro || ambienteFiltro || estado) && <div aria-label="Filtros aplicados" className="mt-3 flex flex-wrap items-center gap-2 text-sm"><span className="text-slate-500">Filtros:</span>{[
+        { valor: busqueda, texto: `Búsqueda: ${busqueda}`, quitar: () => setBusqueda('') },
+        { valor: categoriaFiltro, texto: `Categoría: ${categoriasPorId.get(categoriaFiltro) ?? categoriaFiltro}`, quitar: () => setCategoriaFiltro('') },
+        { valor: ambienteFiltro, texto: `Ubicación: ${ambientesPorId.get(ambienteFiltro)?.nombre ?? ambienteFiltro}`, quitar: () => setAmbienteFiltro('') },
+        { valor: estado, texto: `Estado: ${etiquetasEstado[estado] ?? estado}`, quitar: () => setEstado('') },
+      ].filter((f) => f.valor).map((f) => <button key={f.texto} type="button" aria-label={`Quitar ${f.texto}`} onClick={() => { f.quitar(); setPagina(1) }} className="inline-flex min-h-9 items-center gap-2 rounded-full border border-orange-200 bg-orange-50 px-3 py-1 text-orange-900">{f.texto}<span aria-hidden="true">×</span></button>)}<button type="button" onClick={limpiarFiltros} className="min-h-9 px-2 font-semibold text-slate-600 underline">Limpiar todo</button></div>}
+
       {(ambienteFiltrosIds.length > 0 || sinUbicacionFiltro) && (
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-900">
           <span>
@@ -1321,6 +1351,7 @@ export default function Equipos() {
         </div>
       )}
 
+      <div role="group" aria-label="Presentación de equipos" className="mt-4 hidden justify-end gap-1 lg:flex">{(['tabla','tarjetas'] as const).map((vista) => <button key={vista} type="button" aria-pressed={vistaEquipos === vista} onClick={() => setVistaEquipos(vista)} className={`min-h-10 rounded-lg border px-4 py-2 text-sm font-semibold ${vistaEquipos === vista ? 'border-orange-300 bg-orange-50 text-orange-800' : 'border-slate-200 bg-white text-slate-600'}`}>{vista === 'tabla' ? 'Tabla' : 'Tarjetas'}</button>)}</div>
       <div ref={listadoRef} className="mt-4 min-w-0 scroll-mt-24 overflow-hidden rounded-xl bg-white shadow" aria-busy={cargando}>
         <div className="flex flex-col items-stretch justify-between gap-3 border-b border-slate-100 px-3 py-3 sm:flex-row sm:items-center sm:px-4">
           <h2 className="min-w-0 font-semibold text-slate-800">
@@ -1357,14 +1388,14 @@ export default function Equipos() {
             }}
           />
         </div>
-        <div className="flex flex-wrap items-center gap-3 border-b border-slate-100 bg-blue-50/50 px-4 py-3">
+        <div className="flex flex-wrap items-center gap-3 border-b border-slate-100 bg-orange-50/40 px-4 py-3">
           <label className="flex min-h-9 items-center gap-2 text-sm text-slate-700">
             <input type="checkbox" className="h-4 w-4" disabled={cargando || !equipos.length} checked={equipos.length > 0 && equipos.every((equipo) => seleccionQr.has(equipo.id))} ref={(input) => { if (input) input.indeterminate = equipos.some((equipo) => seleccionQr.has(equipo.id)) && !equipos.every((equipo) => seleccionQr.has(equipo.id)) }} onChange={(event) => seleccionarPaginaEtiquetas(event.target.checked)} />
             Seleccionar esta página
           </label>
           <span role="status" aria-live="polite" className="text-sm text-slate-600">{seleccionQr.size} equipo(s) seleccionado(s)</span>
-          <button type="button" disabled={!seleccionQr.size} onClick={() => setEquiposQr([...seleccionQr.values()].map((seleccionado) => equipos.find((actual) => actual.id === seleccionado.id) ?? seleccionado))} className="min-h-10 rounded-lg bg-blue-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">Vista previa e impresión masiva</button>
-          {seleccionQr.size > 0 && <button type="button" onClick={() => setSeleccionQr(new Map())} className="min-h-9 text-sm font-semibold text-blue-800 underline">Limpiar selección</button>}
+          <button type="button" disabled={!seleccionQr.size} onClick={() => setEquiposQr([...seleccionQr.values()].map((seleccionado) => equipos.find((actual) => actual.id === seleccionado.id) ?? seleccionado))} className="min-h-10 rounded-lg bg-orange-700 px-3 py-2 text-sm font-semibold text-white transition hover:bg-orange-800 disabled:opacity-50">Vista previa e impresión masiva</button>
+          {seleccionQr.size > 0 && <button type="button" onClick={() => setSeleccionQr(new Map())} className="min-h-9 text-sm font-semibold text-orange-800 underline">Limpiar selección</button>}
           <p className="w-full text-xs text-slate-500">La selección se conserva al cambiar de página o aplicar filtros.</p>
         </div>
         {cargando && (
@@ -1403,12 +1434,12 @@ export default function Equipos() {
             }
           />
         )}
-        <div className="divide-y divide-slate-100 lg:hidden">
+        <div className={vistaEquipos === 'tarjetas' ? 'grid gap-3 p-3 md:grid-cols-2 xl:grid-cols-3' : 'divide-y divide-slate-100 lg:hidden'}>
           {equipos.map((equipo) => {
             const ambiente = equipo.ambiente_id ? ambientesPorId.get(equipo.ambiente_id) : null
             const deBaja = equipo.situacion !== 'activo'
             return (
-              <article key={equipo.id} className="min-w-0 space-y-3 p-4">
+              <article key={equipo.id} className={`min-w-0 space-y-3 p-4 ${vistaEquipos === 'tarjetas' ? 'rounded-xl border border-slate-200 bg-white shadow-sm' : ''}`}>
                 <div className="flex items-start justify-between gap-3">
                   <label className="flex min-h-9 items-center gap-2 text-xs font-medium text-slate-600">
                     <input
@@ -1423,7 +1454,7 @@ export default function Equipos() {
                 </div>
                 <div className="min-w-0">
                   <p className="break-all text-sm font-bold text-blue-800">{equipo.codigo_institucional}</p>
-                  <h3 className="mt-0.5 break-words text-base font-semibold text-slate-900">{equipo.nombre}</h3>
+                  <h3 className="mt-0.5 break-words text-base font-semibold text-slate-900">{equipo.nombre}</h3>{compartido(equipo) && <span className="mt-1 inline-flex rounded-full bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-800">Compartido</span>}
                   <p className="mt-1 break-all text-sm text-slate-700">
                     <span className="font-semibold">Serie:</span> {equipo.numero_serie ?? 'Sin serie'}
                   </p>
@@ -1452,7 +1483,7 @@ export default function Equipos() {
                   )}
                 </dl>
                 <div className="grid grid-cols-2 gap-2 min-[420px]:grid-cols-3">
-                  <button type="button" onClick={() => setEquipoQr(equipo)} className="min-h-10 rounded-lg border border-orange-200 px-3 py-2 text-sm font-semibold text-orange-700 hover:bg-orange-50">QR</button>
+                  <button type="button" onClick={() => setEquipoQr(equipo)} className="min-h-10 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">QR</button>
                   <button type="button" onClick={() => void abrirDetalle(equipo)} className="min-h-10 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Detalle</button>
                   {puedeEditar && !deBaja && (
                     <button type="button" onClick={() => void iniciarEdicion(equipo)} className="min-h-10 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Editar</button>
@@ -1468,7 +1499,7 @@ export default function Equipos() {
             )
           })}
         </div>
-        <div className="hidden lg:block">
+        <div className={vistaEquipos === 'tarjetas' ? 'hidden' : 'hidden lg:block'}>
           <table className="w-full table-fixed text-left text-sm">
             <colgroup>
               <col className="w-12" />
@@ -1503,7 +1534,7 @@ export default function Equipos() {
                     </td>
                     <td className="min-w-0 px-3 py-4">
                       <p className="break-all font-semibold text-blue-800">{equipo.codigo_institucional}</p>
-                      <p className="mt-0.5 break-words font-medium text-slate-900">{equipo.nombre}</p>
+                      <p className="mt-0.5 break-words font-medium text-slate-900">{equipo.nombre}</p>{compartido(equipo) && <span className="mt-1 inline-flex rounded-full bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-800">Compartido</span>}
                       <p className="mt-1 break-all text-xs text-slate-700">
                         <span className="font-semibold">Serie:</span> {equipo.numero_serie ?? 'Sin serie'}
                       </p>
@@ -1527,7 +1558,7 @@ export default function Equipos() {
                     </td>
                     <td className="px-3 py-4">
                       <div className="flex flex-wrap gap-1.5">
-                        <button type="button" onClick={() => setEquipoQr(equipo)} className="min-h-9 rounded-lg border border-orange-200 px-3 py-1.5 text-sm font-semibold text-orange-700 hover:bg-orange-50">QR</button>
+                        <button type="button" onClick={() => setEquipoQr(equipo)} className="min-h-9 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">QR</button>
                         <button type="button" onClick={() => void abrirDetalle(equipo)} className="min-h-9 rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50">Detalle</button>
                         {puedeEditar && !deBaja && (
                           <button type="button" onClick={() => void iniciarEdicion(equipo)} className="min-h-9 rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50">Editar</button>
@@ -1612,7 +1643,7 @@ export default function Equipos() {
               </label>
               <div className="mt-4 flex justify-end gap-2">
                 <button type="button" disabled={guardandoCategoria} onClick={() => setCategoriaModal(false)} className="rounded border border-slate-300 px-4 py-2">Cerrar</button>
-                <button type="submit" disabled={guardandoCategoria} className="rounded bg-blue-600 px-4 py-2 font-semibold text-white disabled:opacity-60">{guardandoCategoria ? 'Guardando...' : 'Crear categoría'}</button>
+                <button type="submit" disabled={guardandoCategoria} className="rounded bg-orange-600 px-4 py-2 font-semibold text-white disabled:opacity-60">{guardandoCategoria ? 'Guardando...' : 'Crear categoría'}</button>
               </div>
             </form>
           </section>
@@ -1667,6 +1698,7 @@ export default function Equipos() {
                 No hay categorías activas. Un administrador debe crearlas en la gestión de categorías antes de registrar equipos.
               </p>
             )}
+            <p className="mt-3 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-900">La ubicación indica dónde está físicamente. Después de guardar, abre su ficha → Áreas usuarias para configurar el uso compartido.</p>
             <form noValidate id="formulario-equipo" onSubmit={(event) => void guardarEquipo(event)} className="mt-4 space-y-5">
               <fieldset disabled={guardando || !categorias.length} className="min-w-0 space-y-5">
                 <div className="min-w-0 rounded-xl border border-slate-100 bg-white p-3 sm:p-5">
@@ -1907,7 +1939,7 @@ export default function Equipos() {
                                       aria-label="Usar como imagen principal"
                                       title="Usar como imagen principal"
                                       onClick={() => void cambiarFotografiaPrincipal(editando.id, fotografia)}
-                                      className="text-xs font-medium text-blue-700 hover:underline disabled:opacity-50"
+                                      className="text-xs font-medium text-orange-700 hover:underline disabled:opacity-50"
                                     >
                                       Principal
                                     </button>
@@ -2015,7 +2047,7 @@ export default function Equipos() {
 
       {equipoDetalle && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/50 p-3 sm:p-8">
-          <section className="mx-auto max-w-4xl rounded-xl bg-white p-4 shadow-xl sm:p-6">
+          <section role="dialog" aria-modal="true" aria-label="Ficha del equipo" className="mx-auto max-w-4xl rounded-2xl border border-slate-200 bg-white p-4 shadow-xl sm:p-6">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-blue-700">{equipoDetalle.codigo_institucional}</p>
@@ -2034,9 +2066,11 @@ export default function Equipos() {
                 {aviso}
               </p>
             )}
+            <div className="mt-4 flex items-center gap-3"><EstadoEquipoBadge estado={equipoDetalle.estado_operativo} situacion={equipoDetalle.situacion} /><span className="text-xs text-slate-500">Una ficha por activo · ubicación física única</span></div>
+            <div role="group" aria-label="Secciones de la ficha" className="mt-5 flex gap-1 overflow-x-auto border-b border-slate-200 pb-2">{[['general','General'],['uso','Áreas usuarias'],['tecnica','Información técnica'],['fotos','Fotografías'],['historial','Historial']].map(([id,label]) => <button key={id} type="button" aria-pressed={pestanaDetalle === id} onClick={() => setPestanaDetalle(id)} className={`min-h-11 shrink-0 rounded-lg px-4 py-2 text-sm font-semibold ${pestanaDetalle === id ? 'bg-orange-50 text-orange-800 ring-1 ring-orange-200' : 'text-slate-600 hover:bg-slate-50'}`}>{label}</button>)}</div>
             {detalleCargando ? <p className="py-8 text-center">Cargando detalle...</p> : (
               <div className="mt-4 space-y-5">
-                <dl className="grid gap-3 rounded-lg bg-slate-50 p-4 text-sm sm:grid-cols-2 lg:grid-cols-3">
+                <section hidden={pestanaDetalle !== 'general'} aria-label="Información general"><dl className="grid gap-3 rounded-lg bg-slate-50 p-4 text-sm sm:grid-cols-2 lg:grid-cols-3">
                   <div><dt className="text-slate-500">Número de serie</dt><dd className="font-medium">{equipoDetalle.numero_serie ?? '—'}</dd></div>
                   <div><dt className="text-slate-500">Código patrimonial</dt><dd className="font-medium">{equipoDetalle.codigo_patrimonial ?? '—'}</dd></div>
                   <div><dt className="text-slate-500">Estado operativo</dt><dd className="font-medium">{equipoDetalle.situacion === 'baja' ? 'Dado de baja' : etiquetasEstado[equipoDetalle.estado_operativo]}</dd></div>
@@ -2047,8 +2081,9 @@ export default function Equipos() {
                   <div><dt className="text-slate-500">Registrado</dt><dd className="font-medium">{new Date(equipoDetalle.created_at).toLocaleString()}</dd></div>
                   <div><dt className="text-slate-500">Actualizado</dt><dd className="font-medium">{new Date(equipoDetalle.updated_at).toLocaleString()}</dd></div>
                   <div className="sm:col-span-2 lg:col-span-3"><dt className="text-slate-500">Observaciones</dt><dd className="font-medium">{equipoDetalle.observaciones || '—'}</dd></div>
-                </dl>
-
+                </dl></section>
+                <section hidden={pestanaDetalle !== 'uso'} aria-label="Uso compartido"><AreasUsuariasEquipo key={equipoDetalle.id} equipoId={equipoDetalle.id} ambientes={ambientes} puedeEditar={puedeEditar && equipoDetalle.situacion === 'activo'} onGuardado={(ids) => { setAreasPorEquipo((actual) => ({ ...actual, [equipoDetalle.id]: ids })); setErrorUsoCompartido('') }} /></section>
+                <section hidden={pestanaDetalle !== 'tecnica'} aria-label="Información técnica" className="space-y-5">
                 <div>
                   <h4 className="font-semibold">Componentes y características técnicas</h4>
                   {componentes.length ? (
@@ -2102,7 +2137,8 @@ export default function Equipos() {
                   )}
                 </div>
 
-                <div>
+                </section>
+                <section hidden={pestanaDetalle !== 'fotos'} aria-label="Fotografías del equipo"><div>
                   <h4 className="font-semibold">Fotografías</h4>
                   {fotografiasCargando && (
                     <p role="status" className="mt-2 text-sm text-slate-500">Cargando fotografías…</p>
@@ -2127,7 +2163,7 @@ export default function Equipos() {
                             <img src={fotografia.url} alt={fotografia.descripcion ?? `Fotografía de ${equipoDetalle.codigo_institucional}`} className="h-32 w-40 rounded-lg border object-cover" />
                           </a>
                           <div className="mt-1 flex flex-wrap items-center gap-1">
-                            <span className={`rounded px-2 py-1 text-[10px] font-semibold ${fotografia.tipo === 'principal' ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-600'}`}>
+                            <span className={`rounded px-2 py-1 text-[10px] font-semibold ${fotografia.tipo === 'principal' ? 'bg-orange-100 text-orange-800' : 'bg-slate-100 text-slate-600'}`}>
                               {fotografia.tipo === 'principal' ? 'Principal' : 'Adicional'}
                             </span>
                             {puedeEditar && equipoDetalle.situacion === 'activo' && fotografia.tipo !== 'principal' && (
@@ -2135,7 +2171,7 @@ export default function Equipos() {
                                 type="button"
                                 disabled={gestionandoFoto}
                                 onClick={() => void cambiarFotografiaPrincipal(equipoDetalle.id, fotografia)}
-                                className="text-xs font-medium text-blue-700 hover:underline disabled:opacity-50"
+                                className="text-xs font-medium text-orange-700 hover:underline disabled:opacity-50"
                               >
                                 Hacer principal
                               </button>
@@ -2166,6 +2202,9 @@ export default function Equipos() {
                   )}
                 </div>
 
+                </section>
+                <section hidden={pestanaDetalle !== 'historial'} aria-label="Historial del equipo">
+                {!puedeVerMantenimientos && !puedeVerMovimientos && <p className="text-sm text-slate-500">Tu perfil no tiene acceso al historial de mantenimientos y movimientos.</p>}
                 {(puedeVerMantenimientos || puedeVerMovimientos) && (
                   <div className="grid gap-4 lg:grid-cols-2">
                     {puedeVerMantenimientos && (
@@ -2189,7 +2228,7 @@ export default function Equipos() {
                         {equipoDetalle && (
                           <Link
                             to={`/mantenimientos?equipo=${equipoDetalle.id}`}
-                            className="mt-3 inline-flex text-sm font-semibold text-blue-700 hover:text-blue-900"
+                            className="mt-3 inline-flex text-sm font-semibold text-orange-700 hover:text-orange-900"
                           >
                             Ver todo el historial de este equipo
                           </Link>
@@ -2218,6 +2257,7 @@ export default function Equipos() {
                     )}
                   </div>
                 )}
+                </section>
               </div>
             )}
             <div className="mt-5 grid grid-cols-1 gap-2 min-[420px]:grid-cols-2 sm:flex sm:justify-end">

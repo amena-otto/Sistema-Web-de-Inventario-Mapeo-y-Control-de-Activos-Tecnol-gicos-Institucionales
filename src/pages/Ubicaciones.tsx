@@ -1,3 +1,4 @@
+import EquiposCompartidosArea from '../components/EquiposCompartidosArea'
 import IconoInventario from '../components/IconoInventario'
 import { esOficina, nombreUbicacion, sugerirIcono, iconosUbicacion, iconoCategoria } from '../utils/ubicaciones'
 import { filtrarEquiposUbicacion, etiquetasEstadoUbicacion as etiquetaEstado } from '../utils/busquedaEquiposUbicacion'
@@ -383,7 +384,7 @@ export default function Ubicaciones() {
           <div className="flex flex-wrap gap-2">
             <button type="button" hidden={seccion === 'areas'} onClick={() => abrirFormulario('pabellon')} className="rounded border border-slate-300 bg-white px-3 py-2 text-sm">Agregar pabellón</button>
             <button type="button" hidden={seccion === 'areas'} disabled={!pabellonActual} onClick={() => abrirFormulario('piso')} className="rounded border border-slate-300 bg-white px-3 py-2 text-sm disabled:opacity-50">Agregar piso</button>
-            <button type="button" onClick={() => abrirFormulario('ambiente')} className="rounded bg-blue-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">{seccion === 'areas' ? 'Agregar oficina / área' : 'Agregar ambiente'}</button>
+            <button type="button" onClick={() => abrirFormulario('ambiente')} className="rounded bg-orange-600 px-3 py-2 text-sm font-semibold text-white hover:bg-orange-700 disabled:opacity-50">{seccion === 'areas' ? 'Agregar oficina / área' : 'Agregar ambiente'}</button>
           </div>
         )}
       </div>
@@ -392,7 +393,7 @@ export default function Ubicaciones() {
       {aviso && <p role="status" className="mt-4 rounded-lg bg-green-50 p-3 text-sm text-green-700">{aviso}</p>}
 
       <nav aria-label="Tipo de ubicación" className="mt-5 flex flex-wrap gap-3">
-        {(['areas', 'pabellones'] as const).map((valor) => <button key={valor} type="button" aria-pressed={seccion === valor} onClick={() => { setSeccion(valor); setAmbienteElegido(''); setBusqueda(''); setPaginaEquipos(1) }} className={`flex items-center gap-3 rounded-xl border px-5 py-4 text-left font-semibold ${seccion === valor ? 'border-blue-500 bg-blue-50 text-blue-900' : 'border-slate-200 bg-white text-slate-700'}`}><IconoInventario nombre={valor === 'areas' ? 'oficina' : 'aula'} />{valor === 'areas' ? 'Áreas académicas' : 'Pabellones'}</button>)}
+        {(['areas', 'pabellones'] as const).map((valor) => <button key={valor} type="button" aria-pressed={seccion === valor} onClick={() => { setSeccion(valor); setAmbienteElegido(''); setBusqueda(''); setPaginaEquipos(1) }} className={`flex items-center gap-3 rounded-xl border px-5 py-4 text-left font-semibold ${seccion === valor ? 'border-orange-500 bg-orange-50 text-orange-900' : 'border-slate-200 bg-white text-slate-700'}`}><IconoInventario nombre={valor === 'areas' ? 'oficina' : 'aula'} />{valor === 'areas' ? 'Áreas académicas' : 'Pabellones'}</button>)}
       </nav>
       {seccion === 'pabellones' && (
       <div className="mt-5 grid gap-3 rounded-xl bg-white p-4 shadow md:grid-cols-3">
@@ -432,7 +433,7 @@ export default function Ubicaciones() {
       {seccion === 'pabellones' && pabellonActual && (
         <div className="mt-4 flex flex-wrap gap-2">
           {pisosPabellon.filter((piso) => piso.activo).map((piso) => (
-            <button key={piso.id} type="button" onClick={() => elegirPiso(piso.id)} className={`rounded-full px-4 py-2 text-sm font-medium ${pisoActual?.id === piso.id ? 'bg-blue-600 text-white' : 'border border-slate-300 bg-white text-slate-700'}`}>
+            <button key={piso.id} type="button" onClick={() => elegirPiso(piso.id)} className={`rounded-full px-4 py-2 text-sm font-medium ${pisoActual?.id === piso.id ? 'bg-orange-600 text-white' : 'border border-slate-300 bg-white text-slate-700'}`}>
               {piso.nombre}
             </button>
           ))}
@@ -471,7 +472,7 @@ export default function Ubicaciones() {
                     const lista = equiposPorAmbiente.get(ambiente.id) ?? []
                     return (
                       <li key={ambiente.id}>
-                        <button type="button" onClick={() => elegirAmbiente(ambienteElegido === ambiente.id ? '' : ambiente.id)} className={`w-full rounded-lg border p-3 text-left ${ambienteElegido === ambiente.id ? 'border-blue-400 bg-blue-50' : 'border-slate-200 hover:bg-slate-50'}`}>
+                        <button type="button" onClick={() => elegirAmbiente(ambienteElegido === ambiente.id ? '' : ambiente.id)} className={`w-full rounded-lg border p-3 text-left ${ambienteElegido === ambiente.id ? 'border-orange-400 bg-orange-50' : 'border-slate-200 hover:bg-slate-50'}`}>
                           <span className="flex items-center justify-between gap-2">
                             <span className="flex items-center gap-3 font-medium"><span className="rounded-lg bg-blue-100 p-2 text-blue-800"><IconoInventario nombre={ambiente.icono || sugerirIcono(ambiente.nombre, esArea(ambiente) ? 'oficina' : ambiente.tipo)} /></span>{!esArea(ambiente) && ambiente.codigo ? `${ambiente.codigo} · ` : ''}{ambiente.nombre}</span>
                             <span className="rounded bg-slate-100 px-2 py-0.5 text-xs">{lista.length} equipos</span>
@@ -486,11 +487,11 @@ export default function Ubicaciones() {
             </section>
           </div>
 
-          {ambienteElegido && can('equipos.crear') && <Link to={`/equipos?ambiente=${encodeURIComponent(ambienteElegido)}`} className="mt-4 inline-flex rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white">Ver y agregar equipos en {ambientes.find((a) => a.id === ambienteElegido)?.nombre}</Link>}
+          {ambienteElegido && can('equipos.crear') && <Link to={`/equipos?ambiente=${encodeURIComponent(ambienteElegido)}`} className="mt-4 inline-flex rounded-lg bg-orange-600 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-700">Ver y agregar equipos en {ambientes.find((a) => a.id === ambienteElegido)?.nombre}</Link>}
           <section ref={listadoRef} className="mt-5 min-w-0 scroll-mt-24 rounded-xl bg-white shadow">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b p-4">
               <div>
-                <h3 className="font-semibold">{ambienteElegido ? 'Equipos del ambiente' : 'Equipos del piso'}</h3>
+                <h3 className="font-semibold">{ambienteElegido ? 'Equipos físicamente en el ambiente' : seccion === 'areas' ? 'Equipos físicamente en áreas académicas' : 'Equipos del piso'}</h3>
                 <p className="text-xs text-slate-500">La ubicación se obtiene de la relación del equipo con su ambiente.</p>
               </div>
             </div>
@@ -557,8 +558,8 @@ export default function Ubicaciones() {
                         </div>
                         <p className="break-all text-xs text-slate-700"><span className="font-semibold">Serie:</span> {equipo.numero_serie ?? 'Sin serie'}</p>
                         <p className="break-words text-xs text-slate-500">{equipo.marca ?? 'Sin marca'} · {equipo.modelo ?? 'Sin modelo'}</p>
-                        <p className="break-words text-xs text-slate-600">{ambiente ? `${ambiente.codigo} — ${ambiente.nombre}` : 'Sin ambiente'}</p>
-                        <button type="button" onClick={() => setFicha(equipo)} className="min-h-10 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-blue-800 hover:bg-slate-50">Ver equipo</button>
+                        <p className="break-words text-xs text-slate-600">{ambiente ? esArea(ambiente) ? ambiente.nombre : [ambiente.codigo, ambiente.nombre].filter(Boolean).join(' — ') : 'Sin ambiente'}</p>
+                        <button type="button" onClick={() => setFicha(equipo)} className="min-h-10 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Ver equipo</button>
                       </article>
                     )
                   })}
@@ -595,7 +596,7 @@ export default function Ubicaciones() {
                             </td>
                             <td className="min-w-0 px-4 py-3"><span className="break-words">{ambiente ? esArea(ambiente) ? ambiente.nombre : [ambiente.codigo, ambiente.nombre].filter(Boolean).join(' — ') : '—'}</span></td>
                             <td className="px-4 py-3"><EstadoEquipoBadge estado={equipo.estado_operativo} situacion={equipo.situacion} /></td>
-                            <td className="px-4 py-3"><button type="button" onClick={() => setFicha(equipo)} className="min-h-9 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-blue-800 hover:bg-slate-50">Ver equipo</button></td>
+                            <td className="px-4 py-3"><button type="button" onClick={() => setFicha(equipo)} className="min-h-9 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">Ver equipo</button></td>
                           </tr>
                         )
                       })}
@@ -619,6 +620,8 @@ export default function Ubicaciones() {
           </section>
         </>
       )}
+
+      {ambienteElegido && ambientes.some((a) => a.id === ambienteElegido && esArea(a)) && <EquiposCompartidosArea key={ambienteElegido} ambienteId={ambienteElegido} ambientes={ambientes} />}
 
       {formulario && (
         <div className="fixed inset-0 z-40 flex items-center justify-center overflow-y-auto bg-slate-950/50 p-4">
@@ -657,7 +660,7 @@ export default function Ubicaciones() {
             <div className="mt-5 flex justify-end gap-2">
               {editandoId && <button type="button" disabled={guardando} onClick={() => void borrarUbicacion()} className="mr-auto rounded border border-red-300 px-4 py-2 text-red-700 hover:bg-red-50 disabled:opacity-60">Eliminar</button>}
               <button type="button" disabled={guardando} onClick={() => setFormulario(null)} className="rounded border border-slate-300 px-4 py-2">Cancelar</button>
-              <button type="submit" disabled={guardando || (formulario === 'piso' && !pabellones.length) || (formulario === 'ambiente' && tipoAmbiente !== 'oficina' && !pisos.length)} className="rounded bg-blue-600 px-4 py-2 font-semibold text-white disabled:opacity-60">{guardando ? 'Guardando...' : 'Guardar ubicación'}</button>
+              <button type="submit" disabled={guardando || (formulario === 'piso' && !pabellones.length) || (formulario === 'ambiente' && tipoAmbiente !== 'oficina' && !pisos.length)} className="rounded bg-orange-600 px-4 py-2 font-semibold text-white hover:bg-orange-700 disabled:opacity-60">{guardando ? 'Guardando...' : 'Guardar ubicación'}</button>
             </div>
           </form>
         </div>
@@ -677,9 +680,9 @@ export default function Ubicaciones() {
             </dl>
             <div className="mt-5 flex flex-wrap justify-end gap-2">
               {puedeEditarEquipo && (
-                <button type="button" onClick={() => { setCambioUbicacion({ abierto: true, equipoId: ficha.id, pabellonId: pabellonActual?.id ?? '', pisoId: pisoActual?.id ?? '', ambienteId: ficha.ambiente_id ?? '', guardando: false }); setFicha(null) }} className="rounded border border-blue-200 px-3 py-2 text-sm text-blue-700">Cambiar ubicación</button>
+                <button type="button" onClick={() => { setCambioUbicacion({ abierto: true, equipoId: ficha.id, pabellonId: pabellonActual?.id ?? '', pisoId: pisoActual?.id ?? '', ambienteId: ficha.ambiente_id ?? '', guardando: false }); setFicha(null) }} className="rounded border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50">Cambiar ubicación</button>
               )}
-              <Link to={`/equipos?equipo=${encodeURIComponent(ficha.id)}`} className="rounded bg-blue-600 px-4 py-2 text-sm font-semibold text-white">Abrir ficha completa</Link>
+              <Link to={`/equipos?equipo=${encodeURIComponent(ficha.id)}`} className="rounded bg-orange-600 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-700">Abrir ficha completa</Link>
               <button type="button" onClick={() => setFicha(null)} className="rounded border border-slate-300 px-4 py-2 text-sm">Cerrar</button>
             </div>
           </section>
@@ -724,7 +727,7 @@ export default function Ubicaciones() {
                   setError(mostrarError(e, 'No se pudo cambiar la ubicación.'))
                   setCambioUbicacion((a) => ({ ...a, guardando: false }))
                 }
-              }} className="rounded bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">{cambioUbicacion.guardando ? 'Guardando...' : 'Confirmar traslado'}</button>
+              }} className="rounded bg-orange-600 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-700 disabled:opacity-60">{cambioUbicacion.guardando ? 'Guardando...' : 'Confirmar traslado'}</button>
             </div>
           </div>
         </div>

@@ -249,7 +249,7 @@ export default function Movimientos() {
           <button
             type="button"
             onClick={abrirFormulario}
-            className="rounded-lg bg-blue-700 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-800"
+            className="rounded-lg bg-orange-700 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-orange-800"
           >
             Registrar movimiento
           </button>
@@ -282,7 +282,7 @@ export default function Movimientos() {
               setCargando(true)
               setActualizacion((actual) => actual + 1)
             }}
-            className="text-sm font-medium text-blue-700 hover:text-blue-900"
+            className="text-sm font-medium text-orange-700 hover:text-orange-900"
           >
             Actualizar
           </button>
@@ -614,7 +614,7 @@ export default function Movimientos() {
                 <button
                   type="submit"
                   disabled={guardando || catalogosCargando || equipos.length === 0}
-                  className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-lg bg-orange-700 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-800 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {guardando ? 'Guardando...' : 'Guardar movimiento'}
                 </button>

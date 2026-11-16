@@ -90,7 +90,7 @@ export default function RestablecerPassword() {
           <p role="status" className="mt-4 text-sm text-slate-600">
             {validando ? 'Verificando enlace...' : 'El enlace es inválido, expiró o ya fue utilizado. Solicita uno nuevo. Si recargaste esta pantalla, abre un nuevo enlace de recuperación.'}
           </p>
-          {!validando && <Link to="/recuperar-password" className="mt-6 block text-blue-600 hover:underline">Solicitar nuevo enlace</Link>}
+          {!validando && <Link to="/recuperar-password" className="mt-6 block text-orange-600 hover:underline">Solicitar nuevo enlace</Link>}
         </section>
       </main>
     )
@@ -106,7 +106,7 @@ export default function RestablecerPassword() {
           <p className="mt-3 text-slate-600">{mensaje}</p>
           <button
             onClick={() => navigate('/login', { replace: true })}
-            className="mt-6 w-full rounded-lg bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-700"
+            className="mt-6 w-full rounded-lg bg-orange-600 px-4 py-3 font-semibold text-white hover:bg-orange-700"
           >
             Ir al inicio de sesión
           </button>
@@ -176,7 +176,7 @@ export default function RestablecerPassword() {
           <button
             type="submit"
             disabled={procesando}
-            className="w-full rounded-lg bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+            className="w-full rounded-lg bg-orange-600 px-4 py-3 font-semibold text-white hover:bg-orange-700 disabled:opacity-60"
           >
             {procesando ? 'Actualizando...' : 'Guardar nueva contraseña'}
           </button>

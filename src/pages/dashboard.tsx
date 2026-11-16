@@ -12,8 +12,8 @@ import {
 
 const coloresEstado = [
   { nombre: 'Operativos', estado: 'operativo', color: 'bg-emerald-500', valor: (r: ResumenDashboard) => r.equiposOperativos },
-  { nombre: 'Con fallas', estado: 'con_fallas', color: 'bg-orange-500', valor: (r: ResumenDashboard) => r.equiposConFallas },
-  { nombre: 'En mantenimiento', estado: 'en_mantenimiento', color: 'bg-amber-500', valor: (r: ResumenDashboard) => r.equiposMantenimiento },
+  { nombre: 'Con fallas', estado: 'con_fallas', color: 'bg-amber-500', valor: (r: ResumenDashboard) => r.equiposConFallas },
+  { nombre: 'En mantenimiento', estado: 'en_mantenimiento', color: 'bg-blue-500', valor: (r: ResumenDashboard) => r.equiposMantenimiento },
   { nombre: 'Inoperativos', estado: 'inoperativo', color: 'bg-rose-500', valor: (r: ResumenDashboard) => r.equiposInoperativos },
   { nombre: 'En almacén', estado: 'en_almacen', color: 'bg-violet-500', valor: (r: ResumenDashboard) => r.equiposAlmacen },
   { nombre: 'Dados de baja', estado: 'baja', color: 'bg-slate-400', valor: (r: ResumenDashboard) => r.equiposBaja },
@@ -305,17 +305,17 @@ export default function Dashboard() {
               etiqueta="En mantenimiento"
               cantidad={resumen.equiposMantenimiento}
               detalle="Activos con estado operativo de mantenimiento"
-              tono="bg-amber-50 text-amber-700"
+              tono="bg-blue-50 text-blue-700"
               icono="M14.5 6.5a4 4 0 0 0-5 5L4 17l3 3 5.5-5.5a4 4 0 0 0 5-5l-2.5 2.5-3-3z"
               to={enlaceEquipos({ estado: 'en_mantenimiento' })}
             />
             <TarjetaIndicador
-              etiqueta="En almacén"
-              cantidad={resumen.equiposAlmacen}
-              detalle="Equipos almacenados"
-              tono="bg-violet-50 text-violet-700"
-              icono="M3 10h18M5 10V5h14v5M5 10v9h14v-9M9 19v-5h6v5"
-              to={enlaceEquipos({ estado: 'en_almacen' })}
+              etiqueta="Con observaciones"
+              cantidad={resumen.equiposConFallas}
+              detalle="Requieren revisión del área técnica"
+              tono="bg-amber-50 text-amber-800"
+              icono="M12 8v5m0 4h.01M10 3 2 20h20L14 3Z"
+              to={enlaceEquipos({ estado: 'con_fallas' })}
             />
             <TarjetaIndicador
               etiqueta="Dados de baja"

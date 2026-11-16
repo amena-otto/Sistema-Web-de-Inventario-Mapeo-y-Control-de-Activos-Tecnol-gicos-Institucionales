@@ -572,7 +572,7 @@ export default function Mantenimientos() {
                 }))
                 setVerHistorialCompleto((actual) => !actual)
               }}
-              className="rounded-lg border border-blue-200 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50"
+              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
             >
               {verHistorialCompleto ? 'Ver últimos registros' : 'Ver historial completo'}
             </button>
