@@ -10,6 +10,14 @@ export const estadosMantenimiento = [
 export type EstadoMantenimiento = (typeof estadosMantenimiento)[number]
 export type TipoMantenimiento = 'preventivo' | 'correctivo'
 
+export const estadosOperativosFinales = [
+  'operativo',
+  'con_fallas',
+  'inoperativo',
+] as const
+
+export type EstadoOperativoFinal = (typeof estadosOperativosFinales)[number]
+
 export type CambioEstadoMantenimiento = {
   id: string
   mantenimiento_id: string
@@ -21,6 +29,21 @@ export type CambioEstadoMantenimiento = {
   motivo: string | null
   usuario_id: string | null
   created_at: string
+  usuario: { nombres: string; apellidos: string } | null
+}
+
+export type AvanceMantenimiento = {
+  id: string
+  mantenimiento_id: string
+  equipo_id: string
+  fecha_hora: string
+  registrado_por: string | null
+  descripcion: string
+  observaciones: string | null
+  diagnostico: string | null
+  acciones_realizadas: string | null
+  componentes_reemplazados: string | null
+  proximo_seguimiento: string | null
   usuario: { nombres: string; apellidos: string } | null
 }
 
@@ -37,22 +60,33 @@ export type Mantenimiento = {
   resultado: string | null
   observaciones: string | null
   proxima_revision: string | null
+  proximo_seguimiento: string | null
   estado: EstadoMantenimiento
+  estado_operativo_anterior: EstadoOperativo | null
+  fecha_inicio_real: string | null
+  fecha_finalizacion_real: string | null
+  iniciado_por: { nombres: string; apellidos: string } | null
+  finalizado_por: { nombres: string; apellidos: string } | null
   responsable_id: string | null
   created_at: string
   equipo: {
+    id: string
     codigo_institucional: string
     nombre: string
     estado_operativo: EstadoOperativo
   } | null
   responsable: { nombres: string; apellidos: string } | null
   cambios: CambioEstadoMantenimiento[]
+  avances: AvanceMantenimiento[]
 }
 
 export type EquipoMantenimiento = {
   id: string
   codigo_institucional: string
   nombre: string
+  numero_serie: string | null
+  categoria_nombre: string | null
+  ubicacion: string | null
   estado_operativo: EstadoOperativo
 }
 
@@ -82,16 +116,9 @@ export type NuevoMantenimiento = {
   tipo: TipoMantenimiento
   fecha: string
   problema: string
-  diagnostico: string
-  acciones: string
-  componentes: string
-  resultado: string
   observaciones: string
   proximaRevision: string
-  estado: EstadoMantenimiento
-  estadoEquipo: EstadoOperativo | ''
   responsableId: string
-  motivoEstado: string
 }
 
 export type ActualizacionMantenimiento = {
@@ -104,9 +131,29 @@ export type ActualizacionMantenimiento = {
   resultado: string
   observaciones: string
   proximaRevision: string
-  estadoEquipo: EstadoOperativo | ''
-  motivoEstado: string
   responsableId: string
+}
+
+export type DatosAvanceMantenimiento = {
+  mantenimientoId: string
+  descripcion: string
+  observaciones: string
+  diagnostico: string
+  acciones: string
+  componentes: string
+  proximoSeguimiento: string
+  actualizarSeguimiento: boolean
+}
+
+export type DatosCierreMantenimiento = {
+  mantenimientoId: string
+  diagnostico: string
+  acciones: string
+  resultado: string
+  estadoOperativoFinal: EstadoOperativoFinal
+  componentes: string
+  observacionesFinales: string
+  proximaRevision: string
 }
 
 type EquipoEmbebido = {
@@ -129,13 +176,20 @@ type FilaMantenimiento = {
   resultado: string | null
   observaciones: string | null
   proxima_revision: string | null
+  proximo_seguimiento: string | null
   estado: EstadoMantenimiento
+  estado_operativo_anterior: EstadoOperativo | null
+  fecha_inicio_real: string | null
+  fecha_finalizacion_real: string | null
+  iniciado_por: string | null
+  finalizado_por: string | null
   responsable_id: string | null
   created_at: string
   equipos: EquipoEmbebido | EquipoEmbebido[] | null
 }
 
 type CambioEstadoBase = Omit<CambioEstadoMantenimiento, 'usuario'>
+type AvanceBase = Omit<AvanceMantenimiento, 'usuario'>
 
 const camposMantenimiento = [
   'id',
@@ -150,7 +204,13 @@ const camposMantenimiento = [
   'resultado',
   'observaciones',
   'proxima_revision',
+  'proximo_seguimiento',
   'estado',
+  'estado_operativo_anterior',
+  'fecha_inicio_real',
+  'fecha_finalizacion_real',
+  'iniciado_por',
+  'finalizado_por',
   'responsable_id',
   'created_at',
 ].join(', ')
@@ -168,6 +228,21 @@ const camposCambio = [
   'created_at',
 ].join(', ')
 
+const camposAvance = [
+  'id',
+  'mantenimiento_id',
+  'equipo_id',
+  'fecha_hora',
+  'registrado_por',
+  'descripcion',
+  'observaciones',
+  'diagnostico',
+  'acciones_realizadas',
+  'componentes_reemplazados',
+  'proximo_seguimiento',
+].join(', ')
+
+/** Catálogo simple usado por los filtros del historial. */
 export async function listarEquiposMantenimiento(): Promise<EquipoMantenimiento[]> {
   const { data, error } = await supabase
     .from('equipos')
@@ -175,7 +250,46 @@ export async function listarEquiposMantenimiento(): Promise<EquipoMantenimiento[
     .eq('situacion', 'activo')
     .order('codigo_institucional')
   if (error) throw error
-  return (data ?? []) as EquipoMantenimiento[]
+  return ((data ?? []) as Pick<
+    EquipoMantenimiento,
+    'id' | 'codigo_institucional' | 'nombre' | 'estado_operativo'
+  >[]).map((equipo) => ({
+    ...equipo,
+    numero_serie: null,
+    categoria_nombre: null,
+    ubicacion: null,
+  }))
+}
+
+/**
+ * Búsqueda escrita, paginada y bajo demanda para el formulario de registro.
+ * El normalizador de la RPC ignora mayúsculas y tildes y admite coincidencias
+ * parciales en código, nombre, serie, categoría y ubicación.
+ */
+export async function buscarEquiposMantenimiento(
+  termino: string,
+  offset = 0,
+  limite = 20,
+): Promise<{ equipos: EquipoMantenimiento[]; total: number }> {
+  const { data, error } = await supabase.rpc('buscar_equipos_mantenimiento', {
+    p_termino: termino,
+    p_limite: limite,
+    p_offset: offset,
+  })
+  if (error) throw error
+  const filas = (data ?? []) as (EquipoMantenimiento & { total: number })[]
+  return {
+    equipos: filas.map((fila) => ({
+      id: fila.id,
+      codigo_institucional: fila.codigo_institucional,
+      nombre: fila.nombre,
+      numero_serie: fila.numero_serie,
+      categoria_nombre: fila.categoria_nombre,
+      ubicacion: fila.ubicacion,
+      estado_operativo: fila.estado_operativo,
+    })),
+    total: Number(filas[0]?.total ?? 0),
+  }
 }
 
 export async function listarMantenimientos(filtros: FiltrosMantenimiento) {
@@ -225,41 +339,70 @@ export async function listarMantenimientos(filtros: FiltrosMantenimiento) {
   const registros = (data ?? []) as unknown as FilaMantenimiento[]
   const mantenimientoIds = registros.map((item) => item.id)
 
-  const cambiosResultado = mantenimientoIds.length
-    ? await supabase
-        .from('mantenimiento_cambios_estado')
-        .select(camposCambio)
-        .in('mantenimiento_id', mantenimientoIds)
-        .order('created_at', { ascending: true })
-    : { data: [] as CambioEstadoBase[], error: null }
+  const [cambiosResultado, avancesResultado] = await Promise.all([
+    mantenimientoIds.length
+      ? supabase
+          .from('mantenimiento_cambios_estado')
+          .select(camposCambio)
+          .in('mantenimiento_id', mantenimientoIds)
+          .order('created_at', { ascending: true })
+      : Promise.resolve({ data: [] as CambioEstadoBase[], error: null }),
+    mantenimientoIds.length
+      ? supabase
+          .from('mantenimiento_avances')
+          .select(camposAvance)
+          .in('mantenimiento_id', mantenimientoIds)
+          .order('fecha_hora', { ascending: true })
+      : Promise.resolve({ data: [] as AvanceBase[], error: null }),
+  ])
   if (cambiosResultado.error) throw cambiosResultado.error
+  if (avancesResultado.error) throw avancesResultado.error
+
   const cambios = (cambiosResultado.data ?? []) as CambioEstadoBase[]
+  const avances = (avancesResultado.data ?? []) as AvanceBase[]
 
   const perfilesIds = new Set<string>()
   for (const item of registros) {
     if (item.responsable_id) perfilesIds.add(item.responsable_id)
+    if (item.iniciado_por) perfilesIds.add(item.iniciado_por)
+    if (item.finalizado_por) perfilesIds.add(item.finalizado_por)
   }
   for (const cambio of cambios) {
     if (cambio.usuario_id) perfilesIds.add(cambio.usuario_id)
   }
+  for (const avance of avances) {
+    if (avance.registrado_por) perfilesIds.add(avance.registrado_por)
+  }
 
   const tecnicos = perfilesIds.size ? await listarTecnicosMantenimiento() : []
   const perfilesPorId = new Map(tecnicos.map((item) => [item.id, item]))
+  const perfil = (id: string | null) => {
+    const item = id ? perfilesPorId.get(id) ?? null : null
+    return item
+      ? { nombres: item.nombres, apellidos: item.apellidos }
+      : null
+  }
 
   const cambiosPorMantenimiento = new Map<string, CambioEstadoMantenimiento[]>()
   for (const cambio of cambios) {
-    const perfil = cambio.usuario_id
-      ? perfilesPorId.get(cambio.usuario_id) ?? null
-      : null
     const registro: CambioEstadoMantenimiento = {
       ...cambio,
-      usuario: perfil
-        ? { nombres: perfil.nombres, apellidos: perfil.apellidos }
-        : null,
+      usuario: perfil(cambio.usuario_id),
     }
     const lista = cambiosPorMantenimiento.get(cambio.mantenimiento_id) ?? []
     lista.push(registro)
     cambiosPorMantenimiento.set(cambio.mantenimiento_id, lista)
+  }
+
+  const avancesPorMantenimiento = new Map<string, AvanceMantenimiento[]>()
+  for (const avance of avances) {
+    const registro: AvanceMantenimiento = {
+      ...avance,
+      usuario: perfil(avance.registrado_por),
+    }
+    const lista = avancesPorMantenimiento.get(avance.mantenimiento_id) ?? []
+    lista.push(registro)
+    avancesPorMantenimiento.set(avance.mantenimiento_id, lista)
   }
 
   return {
@@ -267,9 +410,6 @@ export async function listarMantenimientos(filtros: FiltrosMantenimiento) {
       const equipo = Array.isArray(item.equipos)
         ? item.equipos[0] ?? null
         : item.equipos
-      const perfil = item.responsable_id
-        ? perfilesPorId.get(item.responsable_id) ?? null
-        : null
       return {
         id: item.id,
         equipo_id: item.equipo_id,
@@ -283,14 +423,19 @@ export async function listarMantenimientos(filtros: FiltrosMantenimiento) {
         resultado: item.resultado,
         observaciones: item.observaciones,
         proxima_revision: item.proxima_revision,
+        proximo_seguimiento: item.proximo_seguimiento,
         estado: item.estado,
+        estado_operativo_anterior: item.estado_operativo_anterior,
+        fecha_inicio_real: item.fecha_inicio_real,
+        fecha_finalizacion_real: item.fecha_finalizacion_real,
+        iniciado_por: perfil(item.iniciado_por),
+        finalizado_por: perfil(item.finalizado_por),
         responsable_id: item.responsable_id,
         created_at: item.created_at,
         equipo,
-        responsable: perfil
-          ? { nombres: perfil.nombres, apellidos: perfil.apellidos }
-          : null,
+        responsable: perfil(item.responsable_id),
         cambios: cambiosPorMantenimiento.get(item.id) ?? [],
+        avances: avancesPorMantenimiento.get(item.id) ?? [],
       }
     }) as Mantenimiento[],
     total: count ?? 0,
@@ -315,27 +460,29 @@ export async function obtenerIndicadoresMantenimiento() {
   }
 }
 
+/** Alta siempre pendiente; el estado operativo del equipo no se toca. */
 export async function registrarMantenimiento(datos: NuevoMantenimiento) {
   const { data, error } = await supabase.rpc('registrar_mantenimiento', {
     p_equipo_id: datos.equipoId,
     p_tipo: datos.tipo,
     p_fecha_mantenimiento: datos.fecha,
     p_problema_reportado: datos.problema.trim(),
-    p_diagnostico: datos.diagnostico || null,
-    p_acciones_realizadas: datos.acciones || null,
-    p_componentes_reemplazados: datos.componentes || null,
-    p_resultado: datos.resultado || null,
+    p_diagnostico: null,
+    p_acciones_realizadas: null,
+    p_componentes_reemplazados: null,
+    p_resultado: null,
     p_observaciones: datos.observaciones || null,
     p_proxima_revision: datos.proximaRevision || null,
-    p_estado: datos.estado,
-    p_estado_equipo: datos.estadoEquipo || null,
+    p_estado: 'pendiente',
+    p_estado_equipo: null,
     p_responsable_id: datos.responsableId || null,
-    p_motivo_estado: datos.motivoEstado || null,
+    p_motivo_estado: null,
   })
   if (error) throw error
   return data as string
 }
 
+/** Edición ordinaria: no cambia estados ni el estado operativo del equipo. */
 export async function actualizarMantenimiento(datos: ActualizacionMantenimiento) {
   const { data, error } = await supabase.rpc('actualizar_mantenimiento', {
     p_id: datos.id,
@@ -347,9 +494,56 @@ export async function actualizarMantenimiento(datos: ActualizacionMantenimiento)
     p_resultado: datos.resultado || null,
     p_observaciones: datos.observaciones || null,
     p_proxima_revision: datos.proximaRevision || null,
-    p_estado_equipo: datos.estadoEquipo || null,
-    p_motivo: datos.motivoEstado || null,
+    p_estado_equipo: null,
+    p_motivo: null,
     p_responsable_id: datos.responsableId || null,
+  })
+  if (error) throw error
+  return data as string
+}
+
+/** Transición atómica pendiente → en_proceso + equipo a en_mantenimiento. */
+export async function iniciarMantenimiento(
+  mantenimientoId: string,
+  observaciones = '',
+) {
+  const { data, error } = await supabase.rpc('iniciar_mantenimiento', {
+    p_mantenimiento_id: mantenimientoId,
+    p_observaciones: observaciones || null,
+  })
+  if (error) throw error
+  return data as string
+}
+
+/** Registro cronológico e inmutable dentro de la misma intervención. */
+export async function guardarAvanceMantenimiento(datos: DatosAvanceMantenimiento) {
+  const { data, error } = await supabase.rpc('guardar_avance_mantenimiento', {
+    p_mantenimiento_id: datos.mantenimientoId,
+    p_descripcion: datos.descripcion.trim(),
+    p_observaciones: datos.observaciones || null,
+    p_diagnostico: datos.diagnostico || null,
+    p_acciones: datos.acciones || null,
+    p_componentes: datos.componentes || null,
+    p_proximo_seguimiento: datos.actualizarSeguimiento
+      ? datos.proximoSeguimiento || null
+      : null,
+    p_actualizar_seguimiento: datos.actualizarSeguimiento,
+  })
+  if (error) throw error
+  return data as string
+}
+
+/** Transición atómica en_proceso → completado con estado operativo elegido. */
+export async function finalizarMantenimiento(datos: DatosCierreMantenimiento) {
+  const { data, error } = await supabase.rpc('finalizar_mantenimiento', {
+    p_mantenimiento_id: datos.mantenimientoId,
+    p_diagnostico: datos.diagnostico.trim(),
+    p_acciones: datos.acciones.trim(),
+    p_resultado: datos.resultado.trim(),
+    p_estado_operativo_final: datos.estadoOperativoFinal,
+    p_componentes: datos.componentes || null,
+    p_observaciones_finales: datos.observacionesFinales || null,
+    p_proxima_revision: datos.proximaRevision || null,
   })
   if (error) throw error
   return data as string

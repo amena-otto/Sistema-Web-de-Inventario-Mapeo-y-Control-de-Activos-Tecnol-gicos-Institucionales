@@ -1,19 +1,27 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { usePermissions } from '../hooks/usePermissions'
 import SearchableSelect from '../components/SearchableSelect'
 import {
   actualizarMantenimiento,
+  buscarEquiposMantenimiento,
   estadosMantenimiento,
+  estadosOperativosFinales,
+  finalizarMantenimiento,
+  guardarAvanceMantenimiento,
+  iniciarMantenimiento,
   listarEquiposMantenimiento,
   listarMantenimientos,
   listarTecnicosMantenimiento,
   obtenerIndicadoresMantenimiento,
   registrarMantenimiento,
   type ActualizacionMantenimiento,
+  type DatosAvanceMantenimiento,
+  type DatosCierreMantenimiento,
   type EquipoMantenimiento,
   type EstadoMantenimiento,
+  type EstadoOperativoFinal,
   type FiltrosMantenimiento,
   type Mantenimiento,
   type NuevoMantenimiento,
@@ -23,6 +31,8 @@ import {
 import { estadosOperativos } from '../services/equiposService'
 
 const porPagina = 10
+const tamanoBusquedaEquipos = 20
+
 const etiquetasEstado: Record<EstadoMantenimiento, string> = {
   pendiente: 'Pendiente',
   en_proceso: 'En proceso',
@@ -39,11 +49,45 @@ const etiquetasEquipo: Record<(typeof estadosOperativos)[number], string> = {
   inoperativo: 'Inoperativo',
   en_almacen: 'En almacén',
 }
+const etiquetasEstadoFinal: Record<EstadoOperativoFinal, string> = {
+  operativo: 'Operativo',
+  con_fallas: 'Operativo con observaciones',
+  inoperativo: 'Inoperativo',
+}
+
+type DatosAvanceForm = Omit<DatosAvanceMantenimiento, 'mantenimientoId'>
+type DatosCierreForm = Omit<
+  DatosCierreMantenimiento,
+  'mantenimientoId' | 'estadoOperativoFinal'
+> & {
+  estadoOperativoFinal: EstadoOperativoFinal | ''
+}
+
+type FormularioEdicion = ActualizacionMantenimiento & {
+  fechaMantenimiento: string
+  estadoOriginal: EstadoMantenimiento
+}
 
 function fechaLocal() {
   const fecha = new Date()
   const offset = fecha.getTimezoneOffset()
   return new Date(fecha.getTime() - offset * 60_000).toISOString().slice(0, 10)
+}
+
+function fechaHoraLocal(value: string) {
+  const fecha = new Date(value)
+  if (Number.isNaN(fecha.getTime())) return '—'
+  const offset = fecha.getTimezoneOffset()
+  return new Date(fecha.getTime() - offset * 60_000)
+    .toISOString()
+    .slice(0, 16)
+    .replace('T', ' ')
+}
+
+function fechaHoraISO(value: string) {
+  if (!value) return ''
+  const fecha = new Date(value)
+  return Number.isNaN(fecha.getTime()) ? '' : fecha.toISOString()
 }
 
 function mostrarError(error: unknown, fallback: string) {
@@ -97,29 +141,38 @@ function textoTransicion(cambio: Mantenimiento['cambios'][number]) {
   return partes.join(' · ')
 }
 
-type FormularioEdicion = ActualizacionMantenimiento & {
-  fechaMantenimiento: string
-  estadoEquipoOriginal: string
-  estadoOriginal: EstadoMantenimiento
+function nombreUsuario(usuario: { nombres: string; apellidos: string } | null) {
+  return usuario ? `${usuario.nombres} ${usuario.apellidos}`.trim() : 'Usuario no disponible'
 }
-
-// función de transición no requerida tras simplificación del flujo
 
 const formularioVacio = (): NuevoMantenimiento => ({
   equipoId: '',
   tipo: 'preventivo',
   fecha: fechaLocal(),
   problema: '',
+  observaciones: '',
+  proximaRevision: '',
+  responsableId: '',
+})
+
+const avanceVacio = (): DatosAvanceForm => ({
+  descripcion: '',
+  observaciones: '',
   diagnostico: '',
   acciones: '',
   componentes: '',
+  proximoSeguimiento: '',
+  actualizarSeguimiento: false,
+})
+
+const cierreVacio = (): DatosCierreForm => ({
+  diagnostico: '',
+  acciones: '',
   resultado: '',
-  observaciones: '',
+  estadoOperativoFinal: '',
+  componentes: '',
+  observacionesFinales: '',
   proximaRevision: '',
-  estado: 'pendiente',
-  estadoEquipo: '',
-  responsableId: '',
-  motivoEstado: '',
 })
 
 const filtrosVacios: FiltrosMantenimiento = {
@@ -142,6 +195,7 @@ export default function Mantenimientos() {
   const esAdmin = rol === 'admin'
   const [searchParams] = useSearchParams()
   const puedeRegistrar = can('mantenimientos.registrar')
+
   const [equipos, setEquipos] = useState<EquipoMantenimiento[]>([])
   const [tecnicos, setTecnicos] = useState<TecnicoMantenimiento[]>([])
   const [mantenimientos, setMantenimientos] = useState<Mantenimiento[]>([])
@@ -152,6 +206,7 @@ export default function Mantenimientos() {
     vencidos: 0,
     mes: 0,
   })
+
   const filtrosDesdeUrl = ['equipo', 'estado', 'tipo', 'estadoEquipo', 'revision'].some(
     (clave) => searchParams.has(clave),
   )
@@ -169,20 +224,43 @@ export default function Mantenimientos() {
   const [cargandoCatalogos, setCargandoCatalogos] = useState(true)
   const [error, setError] = useState('')
   const [aviso, setAviso] = useState('')
+
   const [modalAbierto, setModalAbierto] = useState(false)
   const [guardando, setGuardando] = useState(false)
   const [nuevo, setNuevo] = useState<NuevoMantenimiento>(formularioVacio)
+  const [busquedaEquipos, setBusquedaEquipos] = useState({
+    termino: '',
+    pagina: 0,
+    resultados: [] as EquipoMantenimiento[],
+    total: 0,
+    cargando: true,
+  })
+
   const [edicion, setEdicion] = useState<FormularioEdicion | null>(null)
-  const [modoEdicion, setModoEdicion] = useState<'editar' | 'ejecutar'>('editar')
   const [guardandoEdicion, setGuardandoEdicion] = useState(false)
   const [errorEdicion, setErrorEdicion] = useState('')
 
+  const [inicioConfirmado, setInicioConfirmado] = useState<Mantenimiento | null>(null)
+  const [guardandoInicio, setGuardandoInicio] = useState(false)
+  const [bloqueoEquipoId, setBloqueoEquipoId] = useState<string | null>(null)
+
+  const [avance, setAvance] = useState<{
+    mantenimiento: Mantenimiento
+    datos: DatosAvanceForm
+  } | null>(null)
+  const [guardandoAvance, setGuardandoAvance] = useState(false)
+  const [errorAvance, setErrorAvance] = useState('')
+
+  const [cierre, setCierre] = useState<{
+    mantenimiento: Mantenimiento
+    datos: DatosCierreForm
+  } | null>(null)
+  const [guardandoCierre, setGuardandoCierre] = useState(false)
+  const [errorCierre, setErrorCierre] = useState('')
+
   useEffect(() => {
     let vigente = true
-    Promise.all([
-      listarEquiposMantenimiento(),
-      listarTecnicosMantenimiento(),
-    ])
+    Promise.all([listarEquiposMantenimiento(), listarTecnicosMantenimiento()])
       .then(([listaEquipos, listaTecnicos]) => {
         if (!vigente) return
         setEquipos(listaEquipos)
@@ -201,10 +279,7 @@ export default function Mantenimientos() {
 
   useEffect(() => {
     let vigente = true
-    Promise.all([
-      listarMantenimientos(filtros),
-      obtenerIndicadoresMantenimiento(),
-    ])
+    Promise.all([listarMantenimientos(filtros), obtenerIndicadoresMantenimiento()])
       .then(([resultado, valores]) => {
         if (!vigente) return
         setMantenimientos(resultado.mantenimientos)
@@ -214,7 +289,7 @@ export default function Mantenimientos() {
       .catch((e: unknown) => {
         if (vigente) {
           setError(
-            `${mostrarError(e, 'No se pudo cargar el historial.')}. Verifica que hayas ejecutado las migraciones 008 y 013 en Supabase.`,
+            `${mostrarError(e, 'No se pudo cargar el historial.')}. Verifica que hayas ejecutado las migraciones 008, 013 y 021 en Supabase.`,
           )
         }
       })
@@ -226,6 +301,44 @@ export default function Mantenimientos() {
     }
   }, [filtros])
 
+  const buscarEquipos = useCallback((termino: string) => {
+    setBusquedaEquipos((actual) =>
+      actual.termino === termino && actual.pagina === 0
+        ? actual
+        : { ...actual, termino, pagina: 0, cargando: true },
+    )
+  }, [])
+
+  useEffect(() => {
+    let vigente = true
+    const esSiguientePagina = busquedaEquipos.pagina > 0
+    buscarEquiposMantenimiento(
+      busquedaEquipos.termino,
+      busquedaEquipos.pagina * tamanoBusquedaEquipos,
+      tamanoBusquedaEquipos,
+    )
+      .then(({ equipos: encontrados, total: encontradosTotal }) => {
+        if (!vigente) return
+        setBusquedaEquipos((actual) => ({
+          ...actual,
+          resultados: esSiguientePagina
+            ? [...actual.resultados, ...encontrados]
+            : encontrados,
+          total: encontradosTotal,
+          cargando: false,
+        }))
+      })
+      .catch((e: unknown) => {
+        if (vigente) {
+          setError(mostrarError(e, 'No se pudo buscar equipos.'))
+          setBusquedaEquipos((actual) => ({ ...actual, cargando: false }))
+        }
+      })
+    return () => {
+      vigente = false
+    }
+  }, [busquedaEquipos.termino, busquedaEquipos.pagina])
+
   const tecnicosActivos = tecnicos.filter((tecnico) => tecnico.activo)
   const otrosTecnicosActivos = tecnicosActivos.filter(
     (tecnico) => tecnico.id !== perfil?.id,
@@ -234,12 +347,9 @@ export default function Mantenimientos() {
     ? `${perfil.nombres} ${perfil.apellidos}`.trim()
     : ''
   const equipoSeleccionadoNuevo =
-    equipos.find((equipo) => equipo.id === nuevo.equipoId) ?? null
-  const cambiaEstadoEquipoNuevo = Boolean(
-    nuevo.estadoEquipo &&
-      equipoSeleccionadoNuevo &&
-      nuevo.estadoEquipo !== equipoSeleccionadoNuevo.estado_operativo,
-  )
+    busquedaEquipos.resultados.find((equipo) => equipo.id === nuevo.equipoId) ??
+    equipos.find((equipo) => equipo.id === nuevo.equipoId) ??
+    null
   const hayFiltros = Boolean(
     filtros.equipoId ||
       filtros.responsableId ||
@@ -266,10 +376,22 @@ export default function Mantenimientos() {
     }))
   }
 
-  function puedeEditarMantenimiento(mantenimiento: Mantenimiento) {
+  function recargarListado() {
+    setCargando(true)
+    setFiltros((actuales) => ({ ...actuales }))
+  }
+
+  async function recargarIndicadores() {
+    try {
+      setIndicadores(await obtenerIndicadoresMantenimiento())
+    } catch (e) {
+      setError(mostrarError(e, 'No se pudieron actualizar los indicadores.'))
+    }
+  }
+
+  function puedeGestionar(mantenimiento: Mantenimiento) {
     if (!puedeRegistrar) return false
-    if (esAdmin) return true
-    return mantenimiento.responsable_id === perfil?.id
+    return esAdmin || mantenimiento.responsable_id === perfil?.id
   }
 
   async function guardar(event: FormEvent<HTMLFormElement>) {
@@ -281,29 +403,18 @@ export default function Mantenimientos() {
       return
     }
     if (nuevo.proximaRevision && nuevo.proximaRevision < nuevo.fecha) {
-      setError('La próxima revisión no puede ser anterior a la fecha del mantenimiento.')
-      return
-    }
-    // Al crear un mantenimiento, el estado debe ser siempre Pendiente
-    if (nuevo.estado === 'completado') {
-      setError('No es posible registrar un mantenimiento directamente como Completado. Debe registrarse como Pendiente.')
-      return
-    }
-    if (cambiaEstadoEquipoNuevo && !nuevo.motivoEstado.trim()) {
-      setError('Indica el motivo del cambio de estado del equipo.')
+      setError('La próxima revisión no puede ser anterior a la fecha programada.')
       return
     }
 
     setGuardando(true)
     try {
-      await registrarMantenimiento({ ...nuevo, estado: 'pendiente' })
+      await registrarMantenimiento(nuevo)
       setModalAbierto(false)
       setNuevo(formularioVacio())
-      setCargando(true)
-      setFiltros((actuales) => ({ ...actuales, pagina: 1 }))
-      setAviso('Mantenimiento registrado correctamente.')
-      const valores = await obtenerIndicadoresMantenimiento()
-      setIndicadores(valores)
+      setAviso('Mantenimiento registrado como pendiente. El estado del equipo no se ha modificado.')
+      recargarListado()
+      await recargarIndicadores()
     } catch (e) {
       setError(mostrarError(e, 'No se pudo registrar el mantenimiento.'))
     } finally {
@@ -318,23 +429,21 @@ export default function Mantenimientos() {
     setNuevo((actual) => ({ ...actual, [campo]: valor }))
   }
 
-  function abrirEdicion(mantenimiento: Mantenimiento, modo: 'editar' | 'ejecutar' | 'iniciar' = 'editar') {
-    const esResponsable = mantenimiento.responsable_id === perfil?.id
-    if (modo === 'iniciar') {
-      if (!(puedeRegistrar && mantenimiento.estado === 'pendiente' && (esResponsable || esAdmin))) return
-    } else if (modo === 'ejecutar') {
-      if (!(puedeRegistrar && mantenimiento.estado !== 'completado' && (esResponsable || esAdmin))) return
-    } else {
-      if (!puedeEditarMantenimiento(mantenimiento) && !(esAdmin)) return
-      if (esResponsable === false && !esAdmin) return
+  function abrirEdicion(mantenimiento: Mantenimiento) {
+    if (!puedeGestionar(mantenimiento)) return
+    if (mantenimiento.estado === 'completado' && !esAdmin) return
+    if (
+      mantenimiento.estado !== 'pendiente' &&
+      mantenimiento.estado !== 'completado'
+    ) {
+      return
     }
     setError('')
     setAviso('')
     setErrorEdicion('')
-    setModoEdicion(modo === 'iniciar' ? 'editar' : modo)
     setEdicion({
       id: mantenimiento.id,
-      estado: modo === 'iniciar' ? 'en_proceso' : mantenimiento.estado,
+      estado: mantenimiento.estado,
       problema: mantenimiento.problema_reportado,
       diagnostico: mantenimiento.diagnostico ?? '',
       acciones: mantenimiento.acciones_realizadas ?? '',
@@ -342,38 +451,17 @@ export default function Mantenimientos() {
       resultado: mantenimiento.resultado ?? '',
       observaciones: mantenimiento.observaciones ?? '',
       proximaRevision: mantenimiento.proxima_revision ?? '',
-      estadoEquipo: mantenimiento.equipo?.estado_operativo ?? '',
-      motivoEstado: '',
       responsableId: mantenimiento.responsable_id ?? '',
       fechaMantenimiento: mantenimiento.fecha_mantenimiento,
-      estadoEquipoOriginal: mantenimiento.equipo?.estado_operativo ?? '',
       estadoOriginal: mantenimiento.estado,
     })
-  }
-
-  function cerrarEdicion() {
-    if (!guardandoEdicion) {
-      setEdicion(null)
-      setModoEdicion('editar')
-    }
   }
 
   function actualizarEdicion<K extends keyof FormularioEdicion>(
     campo: K,
     valor: FormularioEdicion[K],
   ) {
-    setEdicion((actual) => {
-      if (!actual) return actual
-      const siguiente: FormularioEdicion = { ...actual, [campo]: valor }
-      if (
-        campo === 'estado' &&
-        valor === 'completado' &&
-        siguiente.estadoEquipo === 'en_mantenimiento'
-      ) {
-        siguiente.estadoEquipo = 'operativo'
-      }
-      return siguiente
-    })
+    setEdicion((actual) => (actual ? { ...actual, [campo]: valor } : actual))
   }
 
   async function guardarEdicion(event: FormEvent<HTMLFormElement>) {
@@ -391,93 +479,192 @@ export default function Mantenimientos() {
       edicion.proximaRevision < edicion.fechaMantenimiento
     ) {
       setErrorEdicion(
-        'La próxima revisión no puede ser anterior a la fecha del mantenimiento.',
+        'La próxima revisión no puede ser anterior a la fecha programada.',
       )
       return
     }
-    const estadoEquipoResultante =
-      edicion.estadoEquipo || edicion.estadoEquipoOriginal
-    const cambiaEstadoEquipo =
-      Boolean(edicion.estadoEquipo) &&
-      edicion.estadoEquipo !== edicion.estadoEquipoOriginal
-
-    const esResponsable = edicion.responsableId === perfil?.id || mantenimientoEnEdicion?.responsable_id === perfil?.id
-    if (!esAdmin && !esResponsable) {
-      setErrorEdicion('Solo el técnico responsable o un administrador puede gestionar este mantenimiento.')
-      return
-    }
-    if (modoEdicion === 'ejecutar' && edicion.estadoOriginal !== 'completado') {
-      if (
-        !edicion.diagnostico.trim() ||
-        !edicion.acciones.trim() ||
-        !edicion.resultado.trim()
-      ) {
-        setErrorEdicion(
-          'Para registrar el mantenimiento realizado debes ingresar diagnóstico, acciones realizadas y resultado.',
-        )
-        return
-      }
-      if (estadoEquipoResultante === 'en_mantenimiento') {
-        setErrorEdicion(
-          'Al completar la intervención debes indicar un estado resultante distinto de "En mantenimiento".',
-        )
-        return
-      }
-    }
-    if (cambiaEstadoEquipo && !edicion.motivoEstado.trim()) {
-      setErrorEdicion('Indica el motivo del cambio de estado del equipo.')
+    if (edicion.estadoOriginal === 'completado' && !esAdmin) {
+      setErrorEdicion('Solo un administrador puede corregir una intervención completada.')
       return
     }
 
     setGuardandoEdicion(true)
     try {
-      const payload = {
-        ...edicion,
-        estado:
-          modoEdicion === 'ejecutar' && edicion.estadoOriginal !== 'completado'
-            ? 'completado'
-            : edicion.estadoOriginal === 'pendiente' && edicion.estado === 'en_proceso'
-              ? 'en_proceso'
-              : edicion.estadoOriginal === 'completado'
-                ? 'completado'
-                : edicion.estado,
-      }
-      if (payload.estado === 'completado' && edicion.estadoOriginal !== 'completado') {
-        if (!edicion.diagnostico.trim() || !edicion.acciones.trim() || !edicion.resultado.trim()) {
-          setErrorEdicion(
-            'Para registrar el mantenimiento realizado debes ingresar diagnóstico, acciones realizadas y resultado.',
-          )
-          setGuardandoEdicion(false)
-          return
-        }
-      }
-      await actualizarMantenimiento(payload)
+      await actualizarMantenimiento(edicion)
       setEdicion(null)
-      setModoEdicion('editar')
-      setCargando(true)
-      setFiltros((actuales) => ({ ...actuales }))
-      setAviso(
-        modoEdicion === 'ejecutar' && edicion.estadoOriginal !== 'completado'
-          ? 'Mantenimiento realizado registrado correctamente.'
-          : edicion.estadoOriginal === 'pendiente' && edicion.estado === 'en_proceso'
-            ? 'Revisión iniciada correctamente.'
-            : 'Intervención actualizada.',
-      )
-      const valores = await obtenerIndicadoresMantenimiento()
-      setIndicadores(valores)
+      setAviso('Intervención actualizada sin modificar su estado ni el del equipo.')
+      recargarListado()
+      await recargarIndicadores()
     } catch (e) {
-      setErrorEdicion(
-        mostrarError(e, 'No se pudo actualizar la intervención.'),
-      )
+      setErrorEdicion(mostrarError(e, 'No se pudo actualizar la intervención.'))
     } finally {
       setGuardandoEdicion(false)
     }
   }
 
+  async function confirmarInicio() {
+    if (!inicioConfirmado) return
+    setGuardandoInicio(true)
+    setError('')
+    setAviso('')
+    try {
+      await iniciarMantenimiento(inicioConfirmado.id)
+      setAviso(
+        'Mantenimiento iniciado. El equipo quedó en mantenimiento automáticamente.',
+      )
+      setBloqueoEquipoId(null)
+      setInicioConfirmado(null)
+      recargarListado()
+      await recargarIndicadores()
+    } catch (e) {
+      const mensaje = mostrarError(e, 'No se pudo iniciar el mantenimiento.')
+      setError(mensaje)
+      if (/en_proceso/i.test(mensaje)) setBloqueoEquipoId(inicioConfirmado.equipo_id)
+      setInicioConfirmado(null)
+    } finally {
+      setGuardandoInicio(false)
+    }
+  }
+
+  function abrirAvance(mantenimiento: Mantenimiento) {
+    if (!puedeGestionar(mantenimiento)) return
+    setError('')
+    setAviso('')
+    setErrorAvance('')
+    setAvance({ mantenimiento, datos: avanceVacio() })
+  }
+
+  function actualizarAvance<K extends keyof DatosAvanceForm>(
+    campo: K,
+    valor: DatosAvanceForm[K],
+  ) {
+    setAvance((actual) =>
+      actual ? { ...actual, datos: { ...actual.datos, [campo]: valor } } : actual,
+    )
+  }
+
+  async function guardarAvance(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!avance) return
+    setErrorAvance('')
+    if (!avance.datos.descripcion.trim()) {
+      setErrorAvance('Describe el avance registrado.')
+      return
+    }
+    if (avance.datos.actualizarSeguimiento && !fechaHoraISO(avance.datos.proximoSeguimiento)) {
+      setErrorAvance('Indica una próxima fecha de seguimiento válida.')
+      return
+    }
+    setGuardandoAvance(true)
+    try {
+      await guardarAvanceMantenimiento({
+        mantenimientoId: avance.mantenimiento.id,
+        ...avance.datos,
+        proximoSeguimiento: fechaHoraISO(avance.datos.proximoSeguimiento),
+      })
+      setAvance(null)
+      setAviso('Avance guardado. La intervención continúa en proceso.')
+      recargarListado()
+      await recargarIndicadores()
+    } catch (e) {
+      setErrorAvance(mostrarError(e, 'No se pudo guardar el avance.'))
+    } finally {
+      setGuardandoAvance(false)
+    }
+  }
+
+  function abrirCierre(mantenimiento: Mantenimiento) {
+    if (!puedeGestionar(mantenimiento)) return
+    setError('')
+    setAviso('')
+    setErrorCierre('')
+    setCierre({
+      mantenimiento,
+      datos: {
+        ...cierreVacio(),
+        diagnostico: mantenimiento.diagnostico ?? '',
+        acciones: mantenimiento.acciones_realizadas ?? '',
+        componentes: mantenimiento.componentes_reemplazados ?? '',
+        proximaRevision: mantenimiento.proxima_revision ?? '',
+      },
+    })
+  }
+
+  function actualizarCierre<K extends keyof DatosCierreForm>(
+    campo: K,
+    valor: DatosCierreForm[K],
+  ) {
+    setCierre((actual) =>
+      actual ? { ...actual, datos: { ...actual.datos, [campo]: valor } } : actual,
+    )
+  }
+
+  async function guardarCierre(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!cierre) return
+    setErrorCierre('')
+    const datos = cierre.datos
+    if (!datos.diagnostico.trim() || !datos.acciones.trim() || !datos.resultado.trim()) {
+      setErrorCierre(
+        'Para finalizar debes registrar diagnóstico, acciones realizadas y resultado.',
+      )
+      return
+    }
+    if (!datos.estadoOperativoFinal) {
+      setErrorCierre('Selecciona expresamente el estado operativo final del equipo.')
+      return
+    }
+    if (datos.proximaRevision && datos.proximaRevision < cierre.mantenimiento.fecha_mantenimiento) {
+      setErrorCierre('La próxima revisión preventiva no puede ser anterior a la fecha programada.')
+      return
+    }
+    setGuardandoCierre(true)
+    try {
+      await finalizarMantenimiento({
+        mantenimientoId: cierre.mantenimiento.id,
+        diagnostico: datos.diagnostico,
+        acciones: datos.acciones,
+        resultado: datos.resultado,
+        estadoOperativoFinal: datos.estadoOperativoFinal,
+        componentes: datos.componentes,
+        observacionesFinales: datos.observacionesFinales,
+        proximaRevision: datos.proximaRevision,
+      })
+      setCierre(null)
+      setAviso('Mantenimiento completado y estado operativo final registrado.')
+      recargarListado()
+      await recargarIndicadores()
+    } catch (e) {
+      setErrorCierre(mostrarError(e, 'No se pudo finalizar el mantenimiento.'))
+    } finally {
+      setGuardandoCierre(false)
+    }
+  }
+
+  function programarNuevaIntervencion(mantenimiento: Mantenimiento) {
+    setError('')
+    setAviso('')
+    setNuevo({
+      ...formularioVacio(),
+      equipoId: mantenimiento.equipo_id,
+      tipo: mantenimiento.tipo,
+    })
+    setModalAbierto(true)
+  }
+
+  function verHistorialDelEquipo() {
+    if (!bloqueoEquipoId) return
+    cambiarFiltro({
+      equipoId: bloqueoEquipoId,
+      estado: '',
+      revisionVencida: false,
+      ordenReciente: false,
+    })
+    setVerHistorialCompleto(true)
+    setBloqueoEquipoId(null)
+  }
+
   const totalPaginas = Math.max(1, Math.ceil(total / filtros.porPagina))
-  const mantenimientoEnEdicion = edicion
-    ? mantenimientos.find((item) => item.id === edicion.id) ?? null
-    : null
 
   return (
     <main className="space-y-6">
@@ -485,7 +672,7 @@ export default function Mantenimientos() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Mantenimientos</h1>
           <p className="mt-1 text-sm text-slate-600">
-            Registra intervenciones técnicas y consulta el historial de los equipos.
+            Registra, ejecuta y cierra intervenciones con trazabilidad del equipo.
           </p>
         </div>
         {puedeRegistrar && (
@@ -496,7 +683,7 @@ export default function Mantenimientos() {
               setAviso('')
               setModalAbierto(true)
             }}
-            className="rounded-lg bg-[#3B18AF] px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#2f1490]"
+            className="rounded-lg bg-orange-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-orange-700"
           >
             Registrar mantenimiento
           </button>
@@ -505,7 +692,16 @@ export default function Mantenimientos() {
 
       {error && (
         <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-          {error}
+          <p>{error}</p>
+          {bloqueoEquipoId && (
+            <button
+              type="button"
+              onClick={verHistorialDelEquipo}
+              className="mt-2 font-semibold text-blue-700 underline hover:text-blue-900"
+            >
+              Ver el historial del equipo
+            </button>
+          )}
         </div>
       )}
       {aviso && (
@@ -552,8 +748,7 @@ export default function Mantenimientos() {
               type="button"
               onClick={() => {
                 setError('')
-                setCargando(true)
-                setFiltros((actuales) => ({ ...actuales }))
+                recargarListado()
               }}
               className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
             >
@@ -563,7 +758,7 @@ export default function Mantenimientos() {
               type="button"
               onClick={() => {
                 setError('')
-                setCargando(true)
+                recargarListado()
                 const mostrarHistorial = !verHistorialCompleto
                 setFiltros((actuales) => ({
                   ...actuales,
@@ -637,10 +832,10 @@ export default function Mantenimientos() {
               placeholder="Todos"
               value={filtros.tipo}
               onChange={(value) => cambiarFiltro({ tipo: value })}
-              options={([
+              options={[
                 { value: 'preventivo', label: etiquetasTipo.preventivo },
                 { value: 'correctivo', label: etiquetasTipo.correctivo },
-              ])}
+              ]}
             />
           </div>
           <></>
@@ -693,10 +888,8 @@ export default function Mantenimientos() {
                         : 'Equipo no disponible'}
                     </p>
                     <p className="mt-1 text-sm text-slate-600">
-                      {fechaCorta(mantenimiento.fecha_mantenimiento)} · {etiquetasTipo[mantenimiento.tipo]} ·{' '}
-                      {mantenimiento.responsable
-                        ? `${mantenimiento.responsable.nombres} ${mantenimiento.responsable.apellidos}`.trim()
-                        : 'Técnico no disponible'}
+                      Programado: {fechaCorta(mantenimiento.fecha_mantenimiento)} · {etiquetasTipo[mantenimiento.tipo]} ·{' '}
+                      {nombreUsuario(mantenimiento.responsable)}
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
@@ -709,78 +902,110 @@ export default function Mantenimientos() {
                     }`}>
                       {etiquetasEstado[mantenimiento.estado]}
                     </span>
-                    {(mantenimiento.responsable_id === perfil?.id || esAdmin) && mantenimiento.estado === 'pendiente' && (
-                      <button
-                        type="button"
-                        onClick={() => abrirEdicion(mantenimiento, 'iniciar')}
-                        className="rounded-lg bg-orange-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-orange-600"
-                      >
-                        Iniciar revisión
-                      </button>
+                    {puedeGestionar(mantenimiento) && mantenimiento.estado === 'pendiente' && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setError('')
+                            setAviso('')
+                            setInicioConfirmado(mantenimiento)
+                          }}
+                          className="rounded-lg bg-orange-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-orange-600"
+                        >
+                          Iniciar mantenimiento
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => abrirEdicion(mantenimiento)}
+                          className="rounded-lg border border-orange-200 px-3 py-1.5 text-xs font-semibold text-orange-700 hover:bg-orange-50"
+                        >
+                          Editar programación
+                        </button>
+                      </>
                     )}
-                    {(mantenimiento.responsable_id === perfil?.id || esAdmin) && mantenimiento.estado === 'en_proceso' && (
-                      <button
-                        type="button"
-                        onClick={() => abrirEdicion(mantenimiento, 'ejecutar')}
-                        className="rounded-lg bg-orange-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-orange-600"
-                      >
-                        Mantenimiento realizado
-                      </button>
-                    )}
-                    {(mantenimiento.responsable_id === perfil?.id || esAdmin) && mantenimiento.estado !== 'completado' && (
-                      <button
-                        type="button"
-                        onClick={() => abrirEdicion(mantenimiento, 'editar')}
-                        className="rounded-lg bg-orange-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-orange-600"
-                      >
-                        Editar
-                      </button>
+                    {puedeGestionar(mantenimiento) && mantenimiento.estado === 'en_proceso' && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => abrirAvance(mantenimiento)}
+                          className="rounded-lg border border-blue-200 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-50"
+                        >
+                          Guardar avance
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => abrirCierre(mantenimiento)}
+                          className="rounded-lg bg-orange-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-orange-600"
+                        >
+                          Finalizar mantenimiento
+                        </button>
+                      </>
                     )}
                     {puedeRegistrar && mantenimiento.estado === 'completado' && (
                       <button
                         type="button"
-                        onClick={() => {
-                          setError('')
-                          setAviso('')
-                          // abrir modal para agendar nueva revisión
-                          setNuevo({
-                            ...formularioVacio(),
-                            equipoId: mantenimiento.equipo_id,
-                            tipo: mantenimiento.tipo,
-                            fecha: fechaLocal(),
-                            problema: '',
-                            proximaRevision: '',
-                            responsableId: '',
-                          })
-                          setModalAbierto(true)
-                        }}
+                        onClick={() => programarNuevaIntervencion(mantenimiento)}
                         className="rounded-lg border border-indigo-200 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-50"
                       >
-                        Agendar nueva revisión
+                        Programar nueva intervención
                       </button>
                     )}
-                    {(mantenimiento.responsable_id === perfil?.id || esAdmin) && mantenimiento.estado === 'completado' && (
+                    {esAdmin && mantenimiento.estado === 'completado' && (
                       <button
                         type="button"
-                        onClick={() => abrirEdicion(mantenimiento, 'editar')}
+                        onClick={() => abrirEdicion(mantenimiento)}
                         className="rounded-lg bg-orange-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-orange-600"
                       >
-                        Editar
+                        Corrección administrativa
                       </button>
                     )}
                   </div>
                 </div>
+
                 <p className="mt-3 text-sm text-slate-800">
                   <span className="font-medium">Problema reportado:</span> {mantenimiento.problema_reportado}
                 </p>
-                {mantenimiento.proxima_revision && (
-                  <p className="mt-1 text-sm text-slate-600">
-                    Próxima revisión: {fechaCorta(mantenimiento.proxima_revision)}
+                {mantenimiento.estado === 'en_proceso' && mantenimiento.proximo_seguimiento && (
+                  <p className="mt-1 text-sm text-blue-700">
+                    Próximo seguimiento: {fechaHoraLocal(mantenimiento.proximo_seguimiento)}
                   </p>
                 )}
+                {mantenimiento.proxima_revision && (
+                  <p className="mt-1 text-sm text-slate-600">
+                    Próxima revisión preventiva: {fechaCorta(mantenimiento.proxima_revision)}
+                  </p>
+                )}
+
+                {mantenimiento.avances.length > 0 && (
+                  <div className="mt-3 rounded-lg bg-blue-50 p-3">
+                    <p className="text-sm font-semibold text-blue-900">Avances de la intervención</p>
+                    <ol className="mt-2 space-y-3">
+                      {mantenimiento.avances.map((item) => (
+                        <li key={item.id} className="text-sm text-slate-700">
+                          <p className="font-medium text-slate-900">
+                            {fechaHoraLocal(item.fecha_hora)} · {nombreUsuario(item.usuario)}
+                          </p>
+                          <p className="mt-0.5 whitespace-pre-wrap">{item.descripcion}</p>
+                          {item.observaciones && (
+                            <p className="mt-0.5 whitespace-pre-wrap text-slate-600">
+                              Observaciones: {item.observaciones}
+                            </p>
+                          )}
+                          {item.proximo_seguimiento && (
+                            <p className="mt-0.5 text-blue-700">
+                              Próximo seguimiento: {fechaHoraLocal(item.proximo_seguimiento)}
+                            </p>
+                          )}
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
+
                 <details className="mt-3">
                   <summary className="cursor-pointer text-sm font-medium text-blue-700 hover:text-blue-900">
-                    Ver diagnóstico y detalles
+                    Consultar historial y detalles
                   </summary>
                   <dl className="mt-3 grid gap-x-6 gap-y-3 rounded-lg bg-slate-50 p-4 text-sm sm:grid-cols-2">
                     <div>
@@ -803,13 +1028,35 @@ export default function Mantenimientos() {
                       <dt className="font-medium text-slate-700">Estado actual del equipo</dt>
                       <dd className="mt-1 text-slate-600">
                         {mantenimiento.equipo
-                          ? etiquetasEquipo[mantenimiento.equipo.estado_operativo]
+                          ? etiquetaEstadoEquipo(mantenimiento.equipo.estado_operativo)
                           : '—'}
                       </dd>
                     </div>
                     <div>
                       <dt className="font-medium text-slate-700">Observaciones</dt>
                       <dd className="mt-1 whitespace-pre-wrap text-slate-600">{mantenimiento.observaciones || '—'}</dd>
+                    </div>
+                    <div>
+                      <dt className="font-medium text-slate-700">Estado operativo previo</dt>
+                      <dd className="mt-1 text-slate-600">
+                        {etiquetaEstadoEquipo(mantenimiento.estado_operativo_anterior)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="font-medium text-slate-700">Inicio real</dt>
+                      <dd className="mt-1 text-slate-600">
+                        {mantenimiento.fecha_inicio_real
+                          ? `${fechaHoraLocal(mantenimiento.fecha_inicio_real)} · ${nombreUsuario(mantenimiento.iniciado_por)}`
+                          : '—'}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="font-medium text-slate-700">Finalización real</dt>
+                      <dd className="mt-1 text-slate-600">
+                        {mantenimiento.fecha_finalizacion_real
+                          ? `${fechaHoraLocal(mantenimiento.fecha_finalizacion_real)} · ${nombreUsuario(mantenimiento.finalizado_por)}`
+                          : '—'}
+                      </dd>
                     </div>
                     <div className="sm:col-span-2">
                       <dt className="font-medium text-slate-700">Cambios de estado derivados</dt>
@@ -822,10 +1069,8 @@ export default function Mantenimientos() {
                                   {textoTransicion(cambio) || 'Actualización registrada'}
                                 </span>
                                 {' · '}
-                                {fechaCorta(cambio.created_at)}
-                                {cambio.usuario
-                                  ? ` · ${cambio.usuario.nombres} ${cambio.usuario.apellidos}`.trim()
-                                  : ''}
+                                {fechaHoraLocal(cambio.created_at)}
+                                {cambio.usuario ? ` · ${nombreUsuario(cambio.usuario)}` : ''}
                                 {cambio.motivo ? ` · Motivo: ${cambio.motivo}` : ''}
                               </li>
                             ))}
@@ -846,33 +1091,35 @@ export default function Mantenimientos() {
           <span>
             {mantenimientos.length} de {total} registro{total === 1 ? '' : 's'}
           </span>
-          {totalPaginas > 1 && <div className="flex items-center gap-2">
-            <button
-              type="button"
-              disabled={filtros.pagina <= 1 || cargando}
-              onClick={() => {
-                setError('')
-                setCargando(true)
-                setFiltros((actuales) => ({ ...actuales, pagina: actuales.pagina - 1 }))
-              }}
-              className="rounded-lg border border-slate-300 px-3 py-1.5 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Anterior
-            </button>
-            <span>Página {filtros.pagina} de {totalPaginas}</span>
-            <button
-              type="button"
-              disabled={filtros.pagina >= totalPaginas || cargando}
-              onClick={() => {
-                setError('')
-                setCargando(true)
-                setFiltros((actuales) => ({ ...actuales, pagina: actuales.pagina + 1 }))
-              }}
-              className="rounded-lg border border-slate-300 px-3 py-1.5 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Siguiente
-            </button>
-          </div>}
+          {totalPaginas > 1 && (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={filtros.pagina <= 1 || cargando}
+                onClick={() => {
+                  setError('')
+                  setCargando(true)
+                  setFiltros((actuales) => ({ ...actuales, pagina: actuales.pagina - 1 }))
+                }}
+                className="rounded-lg border border-slate-300 px-3 py-1.5 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Anterior
+              </button>
+              <span>Página {filtros.pagina} de {totalPaginas}</span>
+              <button
+                type="button"
+                disabled={filtros.pagina >= totalPaginas || cargando}
+                onClick={() => {
+                  setError('')
+                  setCargando(true)
+                  setFiltros((actuales) => ({ ...actuales, pagina: actuales.pagina + 1 }))
+                }}
+                className="rounded-lg border border-slate-300 px-3 py-1.5 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Siguiente
+              </button>
+            </div>
+          )}
         </div>
       </section>
 
@@ -895,7 +1142,9 @@ export default function Mantenimientos() {
                 <h2 id="form-mantenimiento-titulo" className="text-xl font-bold text-slate-900">
                   Registrar mantenimiento
                 </h2>
-                <p className="mt-1 text-sm text-slate-600">Completa los datos de la intervención técnica.</p>
+                <p className="mt-1 text-sm text-slate-600">
+                  La intervención se guarda como pendiente y el equipo conserva su estado operativo.
+                </p>
               </div>
               <button
                 type="button"
@@ -912,32 +1161,56 @@ export default function Mantenimientos() {
                 <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</div>
               )}
               {cargandoCatalogos ? (
-                <p className="py-5 text-center text-sm text-slate-500">Cargando equipos y técnicos...</p>
-              ) : equipos.length === 0 ? (
-                <p className="rounded-lg bg-amber-50 p-4 text-sm text-amber-800">
-                  No hay equipos activos disponibles para registrar un mantenimiento.
-                </p>
+                <p className="py-5 text-center text-sm text-slate-500">Cargando catálogos...</p>
               ) : (
                 <>
                   <div className="grid gap-4 sm:grid-cols-2">
+                    <SearchableSelect
+                      label="Equipo intervenido *"
+                      placeholder="Escribe nombre, código, serie, categoría o ubicación"
+                      className="sm:col-span-2"
+                      value={nuevo.equipoId}
+                      onChange={(value) => actualizarNuevo('equipoId', value)}
+                      options={busquedaEquipos.resultados.map((equipo) => ({
+                        value: equipo.id,
+                        label: `${equipo.nombre} · ${equipo.codigo_institucional}`,
+                        keywords: [
+                          equipo.codigo_institucional,
+                          equipo.nombre,
+                          equipo.numero_serie,
+                          equipo.categoria_nombre,
+                          equipo.ubicacion,
+                        ]
+                          .filter(Boolean)
+                          .join(' '),
+                        detalle: [
+                          equipo.numero_serie ? `Serie: ${equipo.numero_serie}` : null,
+                          equipo.ubicacion ? `Ubicación: ${equipo.ubicacion}` : null,
+                          equipo.categoria_nombre ? `Categoría: ${equipo.categoria_nombre}` : null,
+                        ]
+                          .filter(Boolean)
+                          .join('\n'),
+                      }))}
+                      onBuscar={buscarEquipos}
+                      remoto
+                      buscando={busquedaEquipos.cargando}
+                      selectedLabel={
+                        equipoSeleccionadoNuevo
+                          ? `${equipoSeleccionadoNuevo.nombre} · ${equipoSeleccionadoNuevo.codigo_institucional}`
+                          : null
+                      }
+                      emptyMessage="No se encontraron equipos con esa búsqueda"
+                      hayMas={busquedaEquipos.resultados.length < busquedaEquipos.total}
+                      onCargarMas={() =>
+                        setBusquedaEquipos((actual) => ({
+                          ...actual,
+                          pagina: actual.pagina + 1,
+                          cargando: true,
+                        }))
+                      }
+                    />
                     <label className="text-sm font-medium text-slate-700">
-                      Equipo intervenido *
-                      <select
-                        required
-                        value={nuevo.equipoId}
-                        onChange={(e) => actualizarNuevo('equipoId', e.target.value)}
-                        className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2"
-                      >
-                        <option value="">Selecciona un equipo</option>
-                        {equipos.map((equipo) => (
-                          <option key={equipo.id} value={equipo.id}>
-                            {equipo.codigo_institucional} — {equipo.nombre}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="text-sm font-medium text-slate-700">
-                      Fecha del mantenimiento *
+                      Fecha programada *
                       <input
                         required
                         type="date"
@@ -958,16 +1231,12 @@ export default function Mantenimientos() {
                         <option value="correctivo">Correctivo</option>
                       </select>
                     </label>
-                    <label className="text-sm font-medium text-slate-700">
-                      Estado de la intervención *
-                      <input
-                        type="text"
-                        readOnly
-                        value={etiquetasEstado['pendiente']}
-                        className="mt-1 w-full rounded-lg border border-slate-300 bg-slate-100 px-3 py-2 text-slate-600"
-                      />
-                      <input type="hidden" value="pendiente" readOnly />
-                    </label>
+                    <div className="text-sm font-medium text-slate-700">
+                      Estado de la intervención
+                      <p className="mt-1 rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-slate-600">
+                        {etiquetasEstado.pendiente}
+                      </p>
+                    </div>
                     <label className="text-sm font-medium text-slate-700 sm:col-span-2">
                       Problema reportado / Motivo de la programación *
                       <textarea
@@ -979,7 +1248,7 @@ export default function Mantenimientos() {
                       />
                     </label>
                     <label className="text-sm font-medium text-slate-700">
-                      Próxima revisión (opcional)
+                      Próxima revisión preventiva (opcional)
                       <input
                         type="date"
                         min={nuevo.fecha}
@@ -989,7 +1258,7 @@ export default function Mantenimientos() {
                       />
                     </label>
                     <label className="text-sm font-medium text-slate-700">
-                      Observaciones (opcional)
+                      Observaciones iniciales (opcional)
                       <textarea
                         rows={2}
                         value={nuevo.observaciones}
@@ -997,7 +1266,7 @@ export default function Mantenimientos() {
                         className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
                       />
                     </label>
-                    <label className="text-sm font-medium text-slate-700">
+                    <label className="text-sm font-medium text-slate-700 sm:col-span-2">
                       Técnico responsable
                       <select
                         disabled={!esAdmin}
@@ -1033,10 +1302,328 @@ export default function Mantenimientos() {
                 </button>
                 <button
                   type="submit"
-                  disabled={guardando || cargandoCatalogos || equipos.length === 0}
-                  className="rounded-lg bg-[#3B18AF] px-4 py-2 text-sm font-semibold text-white hover:bg-[#2f1490] disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={guardando || cargandoCatalogos}
+                  className="rounded-lg bg-orange-600 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {guardando ? 'Guardando...' : 'Guardar mantenimiento'}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
+
+      {inicioConfirmado && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4"
+          role="presentation"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget && !guardandoInicio) setInicioConfirmado(null)
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="confirmar-inicio-titulo"
+            className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl"
+          >
+            <h2 id="confirmar-inicio-titulo" className="text-lg font-bold text-slate-900">
+              Iniciar mantenimiento
+            </h2>
+            <p className="mt-3 text-sm text-slate-600">
+              Se registrará la fecha y hora real de inicio, la intervención pasará a{' '}
+              <strong>En proceso</strong> y el equipo cambiará automáticamente a{' '}
+              <strong>En mantenimiento</strong>. No necesitas seleccionar el estado del equipo.
+            </p>
+            <div className="mt-5 flex justify-end gap-3">
+              <button
+                type="button"
+                disabled={guardandoInicio}
+                onClick={() => setInicioConfirmado(null)}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={guardandoInicio}
+                onClick={confirmarInicio}
+                className="rounded-lg bg-orange-600 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-700 disabled:opacity-50"
+              >
+                {guardandoInicio ? 'Iniciando...' : 'Confirmar inicio'}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {avance && (
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/50 p-4"
+          role="presentation"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget && !guardandoAvance) setAvance(null)
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="form-avance-titulo"
+            className="my-6 w-full max-w-2xl rounded-xl bg-white p-5 shadow-xl sm:p-7"
+          >
+            <div className="mb-5 flex items-start justify-between gap-4">
+              <div>
+                <h2 id="form-avance-titulo" className="text-xl font-bold text-slate-900">
+                  Guardar avance
+                </h2>
+                <p className="mt-1 text-sm text-slate-600">
+                  La intervención permanece en proceso; el equipo sigue en mantenimiento.
+                </p>
+              </div>
+              <button
+                type="button"
+                aria-label="Cerrar"
+                disabled={guardandoAvance}
+                onClick={() => setAvance(null)}
+                className="rounded-md px-2 py-1 text-xl text-slate-500 hover:bg-slate-100 disabled:opacity-50"
+              >
+                ×
+              </button>
+            </div>
+            <form className="space-y-4" onSubmit={guardarAvance}>
+              {errorAvance && (
+                <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+                  {errorAvance}
+                </div>
+              )}
+              <label className="block text-sm font-medium text-slate-700">
+                Descripción del avance *
+                <textarea
+                  required
+                  rows={3}
+                  value={avance.datos.descripcion}
+                  onChange={(e) => actualizarAvance('descripcion', e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                />
+              </label>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="text-sm font-medium text-slate-700">
+                  Diagnóstico actual
+                  <textarea
+                    rows={2}
+                    value={avance.datos.diagnostico}
+                    onChange={(e) => actualizarAvance('diagnostico', e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                  />
+                </label>
+                <label className="text-sm font-medium text-slate-700">
+                  Acciones realizadas
+                  <textarea
+                    rows={2}
+                    value={avance.datos.acciones}
+                    onChange={(e) => actualizarAvance('acciones', e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                  />
+                </label>
+                <label className="text-sm font-medium text-slate-700">
+                  Componentes reemplazados
+                  <textarea
+                    rows={2}
+                    value={avance.datos.componentes}
+                    onChange={(e) => actualizarAvance('componentes', e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                  />
+                </label>
+                <label className="text-sm font-medium text-slate-700">
+                  Observaciones
+                  <textarea
+                    rows={2}
+                    value={avance.datos.observaciones}
+                    onChange={(e) => actualizarAvance('observaciones', e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                  />
+                </label>
+              </div>
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={avance.datos.actualizarSeguimiento}
+                  onChange={(e) => actualizarAvance('actualizarSeguimiento', e.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300"
+                />
+                Establecer o modificar la próxima fecha de seguimiento
+              </label>
+              {avance.datos.actualizarSeguimiento && (
+                <label className="block text-sm font-medium text-slate-700">
+                  Próximo seguimiento
+                  <input
+                    type="datetime-local"
+                    value={avance.datos.proximoSeguimiento}
+                    onChange={(e) => actualizarAvance('proximoSeguimiento', e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                  />
+                </label>
+              )}
+              <div className="flex justify-end gap-3 border-t border-slate-200 pt-4">
+                <button
+                  type="button"
+                  disabled={guardandoAvance}
+                  onClick={() => setAvance(null)}
+                  className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={guardandoAvance}
+                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {guardandoAvance ? 'Guardando...' : 'Guardar avance'}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
+
+      {cierre && (
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/50 p-4"
+          role="presentation"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget && !guardandoCierre) setCierre(null)
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="form-cierre-titulo"
+            className="my-6 w-full max-w-3xl rounded-xl bg-white p-5 shadow-xl sm:p-7"
+          >
+            <div className="mb-5 flex items-start justify-between gap-4">
+              <div>
+                <h2 id="form-cierre-titulo" className="text-xl font-bold text-slate-900">
+                  Finalizar mantenimiento
+                </h2>
+                <p className="mt-1 text-sm text-slate-600">
+                  Registra el cierre y elige expresamente la condición real del equipo.
+                </p>
+              </div>
+              <button
+                type="button"
+                aria-label="Cerrar"
+                disabled={guardandoCierre}
+                onClick={() => setCierre(null)}
+                className="rounded-md px-2 py-1 text-xl text-slate-500 hover:bg-slate-100 disabled:opacity-50"
+              >
+                ×
+              </button>
+            </div>
+            <form className="space-y-4" onSubmit={guardarCierre}>
+              {errorCierre && (
+                <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+                  {errorCierre}
+                </div>
+              )}
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="text-sm font-medium text-slate-700 sm:col-span-2">
+                  Diagnóstico final *
+                  <textarea
+                    required
+                    rows={2}
+                    value={cierre.datos.diagnostico}
+                    onChange={(e) => actualizarCierre('diagnostico', e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                  />
+                </label>
+                <label className="text-sm font-medium text-slate-700 sm:col-span-2">
+                  Acciones realizadas *
+                  <textarea
+                    required
+                    rows={2}
+                    value={cierre.datos.acciones}
+                    onChange={(e) => actualizarCierre('acciones', e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                  />
+                </label>
+                <label className="text-sm font-medium text-slate-700">
+                  Componentes reemplazados
+                  <textarea
+                    rows={2}
+                    value={cierre.datos.componentes}
+                    onChange={(e) => actualizarCierre('componentes', e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                  />
+                </label>
+                <label className="text-sm font-medium text-slate-700">
+                  Resultado de la intervención *
+                  <textarea
+                    required
+                    rows={2}
+                    value={cierre.datos.resultado}
+                    onChange={(e) => actualizarCierre('resultado', e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                  />
+                </label>
+                <label className="text-sm font-medium text-slate-700">
+                  Estado operativo final del equipo *
+                  <select
+                    required
+                    value={cierre.datos.estadoOperativoFinal}
+                    onChange={(e) =>
+                      actualizarCierre(
+                        'estadoOperativoFinal',
+                        e.target.value as EstadoOperativoFinal,
+                      )
+                    }
+                    className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2"
+                  >
+                    <option value="">Selecciona el estado real</option>
+                    {estadosOperativosFinales.map((estado) => (
+                      <option key={estado} value={estado}>
+                        {etiquetasEstadoFinal[estado]}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="mt-1 block text-xs font-normal text-slate-500">
+                    No se selecciona automáticamente. Finalizar no implica que el equipo quedó operativo.
+                  </span>
+                </label>
+                <label className="text-sm font-medium text-slate-700">
+                  Próxima revisión preventiva (opcional)
+                  <input
+                    type="date"
+                    min={cierre.mantenimiento.fecha_mantenimiento}
+                    value={cierre.datos.proximaRevision}
+                    onChange={(e) => actualizarCierre('proximaRevision', e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                  />
+                </label>
+                <label className="text-sm font-medium text-slate-700 sm:col-span-2">
+                  Observaciones finales
+                  <textarea
+                    rows={2}
+                    value={cierre.datos.observacionesFinales}
+                    onChange={(e) => actualizarCierre('observacionesFinales', e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                  />
+                </label>
+              </div>
+              <div className="flex justify-end gap-3 border-t border-slate-200 pt-4">
+                <button
+                  type="button"
+                  disabled={guardandoCierre}
+                  onClick={() => setCierre(null)}
+                  className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={guardandoCierre}
+                  className="rounded-lg bg-orange-600 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-700 disabled:opacity-50"
+                >
+                  {guardandoCierre ? 'Finalizando...' : 'Finalizar mantenimiento'}
                 </button>
               </div>
             </form>
@@ -1049,7 +1636,7 @@ export default function Mantenimientos() {
           className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/50 p-4"
           role="presentation"
           onMouseDown={(e) => {
-            if (e.target === e.currentTarget && !guardandoEdicion) cerrarEdicion()
+            if (e.target === e.currentTarget && !guardandoEdicion) setEdicion(null)
           }}
         >
           <section
@@ -1061,26 +1648,19 @@ export default function Mantenimientos() {
             <div className="mb-5 flex items-start justify-between gap-4">
               <div>
                 <h2 id="form-edicion-titulo" className="text-xl font-bold text-slate-900">
-                  {edicion.estadoOriginal === 'pendiente' && edicion.estado === 'en_proceso'
-                    ? 'Iniciar revisión'
-                    : modoEdicion === 'ejecutar' && edicion.estadoOriginal !== 'completado'
-                      ? 'Registrar mantenimiento realizado'
-                      : edicion.estadoOriginal === 'completado'
-                        ? 'Editar mantenimiento'
-                        : 'Editar mantenimiento'}
+                  {edicion.estado === 'completado'
+                    ? 'Corrección administrativa'
+                    : 'Editar programación'}
                 </h2>
                 <p className="mt-1 text-sm text-slate-600">
-                  {mantenimientoEnEdicion?.equipo
-                    ? `${mantenimientoEnEdicion.equipo.codigo_institucional} — ${mantenimientoEnEdicion.equipo.nombre}`
-                    : 'Intervención técnica'}{' '}
-                  · Programado: {fechaCorta(edicion.fechaMantenimiento)}
+                  Esta edición no cambia el estado de la intervención ni el del equipo.
                 </p>
               </div>
               <button
                 type="button"
                 aria-label="Cerrar"
                 disabled={guardandoEdicion}
-                onClick={cerrarEdicion}
+                onClick={() => setEdicion(null)}
                 className="rounded-md px-2 py-1 text-xl text-slate-500 hover:bg-slate-100 disabled:opacity-50"
               >
                 ×
@@ -1092,39 +1672,15 @@ export default function Mantenimientos() {
                   {errorEdicion}
                 </div>
               )}
-              {edicion.estadoOriginal === 'pendiente' && edicion.estado === 'en_proceso' && (
-                <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                  Esta acción iniciará la revisión y cambiará el estado a <strong>En proceso</strong>.
-                </div>
-              )}
-              {modoEdicion === 'ejecutar' && edicion.estadoOriginal !== 'completado' && edicion.estadoOriginal !== 'pendiente' && (
-                <div className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
-                  Esta acción registrará la ejecución real del mantenimiento y lo marcará como <strong>Completado</strong>.
-                </div>
-              )}
-              {edicion.estadoOriginal === 'completado' && (
-                <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                  Estado actual de la intervención: <strong>{etiquetasEstado[edicion.estadoOriginal]}</strong>.
-                </div>
-              )}
               <div className="grid gap-4 sm:grid-cols-2">
-                <label className="text-sm font-medium text-slate-700">
-                  Estado de la intervención *
-                  <input
-                    type="text"
-                    readOnly
-                    value={edicion.estadoOriginal === 'pendiente' && edicion.estado === 'en_proceso' ? etiquetasEstado['en_proceso'] : modoEdicion === 'ejecutar' && edicion.estadoOriginal !== 'completado' && edicion.estadoOriginal !== 'pendiente' ? etiquetasEstado['completado'] : etiquetasEstado[edicion.estado]}
-                    className="mt-1 w-full rounded-lg border border-slate-300 bg-slate-100 px-3 py-2 text-slate-600"
-                  />
-                  {edicion.estadoOriginal === 'pendiente' && edicion.estado === 'en_proceso' && (
-                    <input type="hidden" value="en_proceso" />
-                  )}
-                  {modoEdicion === 'ejecutar' && edicion.estadoOriginal !== 'completado' && edicion.estadoOriginal !== 'pendiente' && (
-                    <input type="hidden" value="completado" />
-                  )}
-                </label>
                 <div className="text-sm font-medium text-slate-700">
-                  Fecha del mantenimiento
+                  Estado de la intervención
+                  <p className="mt-1 rounded-lg bg-slate-100 px-3 py-2 font-normal text-slate-600">
+                    {etiquetasEstado[edicion.estado]}
+                  </p>
+                </div>
+                <div className="text-sm font-medium text-slate-700">
+                  Fecha programada original
                   <p className="mt-1 rounded-lg bg-slate-100 px-3 py-2 font-normal text-slate-600">
                     {fechaCorta(edicion.fechaMantenimiento)}
                   </p>
@@ -1137,60 +1693,10 @@ export default function Mantenimientos() {
                     value={edicion.problema}
                     onChange={(e) => actualizarEdicion('problema', e.target.value)}
                     className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
-                    readOnly={edicion.estadoOriginal === 'completado' && !esAdmin}
                   />
                 </label>
-                {(modoEdicion === 'ejecutar' || edicion.estadoOriginal === 'completado') && edicion.estadoOriginal !== 'pendiente' && (
-                  <>
-                    <label className="text-sm font-medium text-slate-700">
-                      Diagnóstico
-                      <textarea
-                        rows={2}
-                        value={edicion.diagnostico}
-                        onChange={(e) => actualizarEdicion('diagnostico', e.target.value)}
-                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
-                      />
-                      {modoEdicion === 'ejecutar' && edicion.estadoOriginal !== 'completado' && (
-                        <span className="mt-1 block text-xs font-normal text-slate-500">Obligatorio para completar.</span>
-                      )}
-                    </label>
-                    <label className="text-sm font-medium text-slate-700">
-                      Acciones realizadas
-                      <textarea
-                        rows={2}
-                        value={edicion.acciones}
-                        onChange={(e) => actualizarEdicion('acciones', e.target.value)}
-                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
-                      />
-                      {modoEdicion === 'ejecutar' && edicion.estadoOriginal !== 'completado' && (
-                        <span className="mt-1 block text-xs font-normal text-slate-500">Obligatorio para completar.</span>
-                      )}
-                    </label>
-                    <label className="text-sm font-medium text-slate-700">
-                      Componentes reemplazados
-                      <textarea
-                        rows={2}
-                        value={edicion.componentes}
-                        onChange={(e) => actualizarEdicion('componentes', e.target.value)}
-                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
-                      />
-                    </label>
-                    <label className="text-sm font-medium text-slate-700">
-                      Resultado de la intervención
-                      <textarea
-                        rows={2}
-                        value={edicion.resultado}
-                        onChange={(e) => actualizarEdicion('resultado', e.target.value)}
-                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
-                      />
-                      {modoEdicion === 'ejecutar' && edicion.estadoOriginal !== 'completado' && (
-                        <span className="mt-1 block text-xs font-normal text-slate-500">Obligatorio para completar.</span>
-                      )}
-                    </label>
-                  </>
-                )}
                 <label className="text-sm font-medium text-slate-700">
-                  Próxima revisión
+                  Próxima revisión preventiva
                   <input
                     type="date"
                     min={edicion.fechaMantenimiento}
@@ -1200,54 +1706,9 @@ export default function Mantenimientos() {
                   />
                 </label>
                 <label className="text-sm font-medium text-slate-700">
-                  Estado resultante del equipo
-                  <select
-                    value={edicion.estadoEquipo}
-                    onChange={(e) =>
-                      actualizarEdicion('estadoEquipo', e.target.value as ActualizacionMantenimiento['estadoEquipo'])
-                    }
-                    className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2"
-                  >
-                    <option value="">No modificar estado</option>
-                    {estadosOperativos
-                      .filter(
-                        (estado) =>
-                          !(edicion.estado === 'completado' && estado === 'en_mantenimiento'),
-                      )
-                      .map((estado) => (
-                        <option key={estado} value={estado}>{etiquetasEquipo[estado]}</option>
-                      ))}
-                  </select>
-                  {edicion.estado === 'completado' && (
-                    <span className="mt-1 block text-xs font-normal text-slate-500">
-                      Al completar, el equipo no puede quedar en mantenimiento.
-                    </span>
-                  )}
-                </label>
-                {edicion.estadoEquipo &&
-                  edicion.estadoEquipo !== edicion.estadoEquipoOriginal && (
-                  <label className="text-sm font-medium text-slate-700 sm:col-span-2">
-                    Motivo del cambio de estado del equipo *
-                    <textarea
-                      required
-                      rows={2}
-                      value={edicion.motivoEstado}
-                      onChange={(e) => actualizarEdicion('motivoEstado', e.target.value)}
-                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
-                    />
-                    <span className="mt-1 block text-xs font-normal text-slate-500">
-                      Cambio: {etiquetaEstadoEquipo(edicion.estadoEquipoOriginal)} →{' '}
-                      {edicion.estadoEquipo
-                        ? etiquetaEstadoEquipo(edicion.estadoEquipo)
-                        : 'sin cambio'}
-                    </span>
-                  </label>
-                )}
-                <label className="text-sm font-medium text-slate-700 sm:col-span-2">
                   Técnico responsable
                   {esAdmin ? (
                     <select
-                      required
                       value={edicion.responsableId}
                       onChange={(e) => actualizarEdicion('responsableId', e.target.value)}
                       className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2"
@@ -1272,6 +1733,46 @@ export default function Mantenimientos() {
                     </p>
                   )}
                 </label>
+                {edicion.estado === 'completado' && (
+                  <>
+                    <label className="text-sm font-medium text-slate-700">
+                      Diagnóstico
+                      <textarea
+                        rows={2}
+                        value={edicion.diagnostico}
+                        onChange={(e) => actualizarEdicion('diagnostico', e.target.value)}
+                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                      />
+                    </label>
+                    <label className="text-sm font-medium text-slate-700">
+                      Acciones realizadas
+                      <textarea
+                        rows={2}
+                        value={edicion.acciones}
+                        onChange={(e) => actualizarEdicion('acciones', e.target.value)}
+                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                      />
+                    </label>
+                    <label className="text-sm font-medium text-slate-700">
+                      Componentes reemplazados
+                      <textarea
+                        rows={2}
+                        value={edicion.componentes}
+                        onChange={(e) => actualizarEdicion('componentes', e.target.value)}
+                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                      />
+                    </label>
+                    <label className="text-sm font-medium text-slate-700">
+                      Resultado
+                      <textarea
+                        rows={2}
+                        value={edicion.resultado}
+                        onChange={(e) => actualizarEdicion('resultado', e.target.value)}
+                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                      />
+                    </label>
+                  </>
+                )}
                 <label className="text-sm font-medium text-slate-700 sm:col-span-2">
                   Observaciones
                   <textarea
@@ -1286,7 +1787,7 @@ export default function Mantenimientos() {
                 <button
                   type="button"
                   disabled={guardandoEdicion}
-                  onClick={cerrarEdicion}
+                  onClick={() => setEdicion(null)}
                   className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                 >
                   Cancelar
@@ -1294,7 +1795,7 @@ export default function Mantenimientos() {
                 <button
                   type="submit"
                   disabled={guardandoEdicion}
-                  className="rounded-lg bg-[#3B18AF] px-4 py-2 text-sm font-semibold text-white hover:bg-[#2f1490] disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-lg bg-orange-600 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-700 disabled:opacity-50"
                 >
                   {guardandoEdicion ? 'Guardando...' : 'Guardar cambios'}
                 </button>
