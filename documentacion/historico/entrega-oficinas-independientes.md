@@ -1,4 +1,8 @@
-# Oficinas independientes y diferenciación visual
+# Entrega de oficinas independientes
+
+> Documento histórico de la rama `feat/ubicaciones-oficinas`. Conserva el alcance
+> y las verificaciones originales. El comportamiento vigente se describe en
+> [ubicaciones](../modulos/ubicaciones.md).
 
 Base revisada: c0fc3a06127e7879ff22acb9139bd33830acef06 (main).
 

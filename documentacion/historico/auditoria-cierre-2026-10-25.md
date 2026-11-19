@@ -1,5 +1,10 @@
 # Auditoría de cierre: inventario, seguridad y entrega
 
+> Documento histórico. Conserva la redacción y las cifras originales de la
+> entrega del 25 de octubre de 2026. Las correcciones posteriores se registran en
+> [discrepancias conocidas](../discrepancias-conocidas.md) y el estado actual de
+> los módulos se describe en el [índice documental](../README.md).
+
 **Fecha:** 25 de octubre de 2026
 **Alcance:** repositorio completo (frontend, migraciones 001–013, RLS, Edge Functions, CI, respaldos, módulo de mantenimientos y documentación).
 **Método:** inspección estática, ejecución de validaciones locales y revisión de documentación. Las pruebas que crean o modifican datos quedan reservadas a staging.

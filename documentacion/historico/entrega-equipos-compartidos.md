@@ -1,4 +1,8 @@
-# Interfaz y equipos compartidos
+# Entrega de interfaz y equipos compartidos
+
+> Documento histórico de la rama `feat/interfaz-equipos-compartidos`. Conserva el
+> alcance y las verificaciones originales. El comportamiento vigente se describe
+> en [equipos compartidos y áreas usuarias](../modulos/equipos-compartidos.md).
 
 Base: `45527da` (main), con PR #11 de oficinas independientes ya integrado.
 Rama propuesta para la instalación: `feat/interfaz-equipos-compartidos`.

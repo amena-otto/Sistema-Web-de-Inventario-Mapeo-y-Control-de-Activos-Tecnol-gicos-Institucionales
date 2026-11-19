@@ -1,4 +1,3 @@
-
 # Relaciones y restricciones de la base de datos
 
 ## 1. Información general
@@ -9,9 +8,13 @@ La base de datos utiliza restricciones de PostgreSQL para mantener la integridad
 
 | Tabla de origen | Columna | Tabla relacionada | Columna relacionada |
 |---|---|---|---|
-| ambientes | piso_id | pisos | id |
+| ambientes | piso_id | pisos | id (nulo en oficinas independientes) |
 | auditoria | usuario_id | profiles | id |
 | componentes | equipo_id | equipos | id |
+| eliminaciones_pendientes | creado_por | profiles | id |
+| equipo_areas_usuarias | ambiente_id | ambientes | id |
+| equipo_areas_usuarias | creado_por | profiles | id |
+| equipo_areas_usuarias | equipo_id | equipos | id (borrado en cascada) |
 | equipos | ambiente_id | ambientes | id |
 | equipos | categoria_id | categorias_equipos | id |
 | equipos | creado_por | profiles | id |
@@ -31,7 +34,7 @@ La base de datos utiliza restricciones de PostgreSQL para mantener la integridad
 | relaciones_equipos | equipo_principal_id | equipos | id |
 | relaciones_equipos | equipo_relacionado_id | equipos | id |
 
-`equipos_eliminados` no mantiene una clave foránea hacia `equipos`: la constancia de la baja definitiva debe sobrevivir al borrado del activo.
+`equipos_eliminados` no mantiene una clave foránea hacia `equipos`: la constancia de la baja definitiva debe sobrevivir al borrado del activo. `eliminaciones_pendientes` solo es accesible para `service_role` y no se expone mediante políticas RLS.
 
 ## 3. Claves primarias
 
@@ -44,6 +47,8 @@ Se verificaron las siguientes restricciones de unicidad:
 - `ambientes`: combinación de `piso_id` y `codigo`.
 - `categorias_equipos`: `nombre`.
 - `equipos`: `codigo_institucional`.
+- `equipo_areas_usuarias`: combinación de `equipo_id` y `ambiente_id`.
+- `eliminaciones_pendientes`: `equipo_id`.
 - `fotografias_equipos`: `ruta_storage`.
 - `pabellones`: `nombre`.
 - `pisos`: combinación de `pabellon_id` y `nombre`.
@@ -63,7 +68,10 @@ Se identificaron restricciones para validar los valores y estados de los registr
 - `mantenimiento_cambios_estado_mantenimiento_check`: valida los estados de la intervención registrados en la trazabilidad.
 - `mantenimientos_estado_check`: valida el estado del mantenimiento.
 - `mantenimientos_tipo_check`: valida el tipo de mantenimiento.
-- `movimientos_check`: valida una condición definida para los movimientos.
+- `movimientos_check`: exige un cambio real de ambiente, responsable o posición.
+- `eliminaciones_pendientes_rutas_check` y `eliminaciones_pendientes_drive_check`: prohíben valores nulos en las listas de rutas e identificadores.
+- Restricciones de la migración `019` sobre oficinas sin piso/código y ambientes con piso/código exigidos según el tipo.
+- Restricciones de la migración `020` sobre oficinas activas o áreas del agrupador `AREAS` para los vínculos de uso compartido.
 
 También existen restricciones de obligatoriedad para distintas columnas.
 

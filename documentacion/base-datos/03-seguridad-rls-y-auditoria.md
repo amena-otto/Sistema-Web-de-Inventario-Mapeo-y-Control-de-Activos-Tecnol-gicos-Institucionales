@@ -1,34 +1,56 @@
+# Seguridad, RLS y auditoría
 
-## 5. Auditoría de operaciones
+## 1. Modelo de acceso
 
-La base de datos dispone de la función `private.registrar_auditoria()`, invocada por disparadores que se ejecutan después de las operaciones realizadas sobre determinadas tablas.
+La autorización se apoya en tres capas:
 
-### 5.1 Disparadores identificados
+1. La matriz de permisos del frontend (`src/hooks/usePermissions.ts`) controla menús, rutas y botones.
+2. Las políticas de seguridad a nivel de fila (RLS) restringen lecturas y escrituras desde la API.
+3. Las funciones `security definer` con `search_path` vacío centralizan las operaciones sensibles y validan el rol activo con `private.tiene_rol(...)`.
 
-| Tabla | Disparador | Eventos registrados |
+Los roles son `admin`, `tecnico` y `consulta`. Una cuenta inactiva deja de satisfacer las comprobaciones de rol en esas funciones.
+
+## 2. Disparadores de auditoría
+
+`private.registrar_auditoria()` se invoca mediante disparadores posteriores a operaciones sobre tablas relevantes.
+
+| Tabla | Disparador | Eventos |
 |---|---|---|
-| componentes | auditoria_componentes | INSERT, UPDATE, DELETE |
-| equipos | auditoria_equipos | INSERT, UPDATE, DELETE |
-| mantenimientos | auditoria_mantenimientos | INSERT, UPDATE, DELETE |
-| movimientos | auditoria_movimientos | INSERT, UPDATE, DELETE |
-| relaciones_equipos | auditoria_relaciones | INSERT, UPDATE, DELETE |
+| componentes | `auditoria_componentes` | INSERT, UPDATE, DELETE |
+| equipos | `auditoria_equipos` | INSERT, UPDATE, DELETE |
+| mantenimientos | `auditoria_mantenimientos` | INSERT, UPDATE, DELETE |
+| movimientos | `auditoria_movimientos` | INSERT, UPDATE, DELETE |
+| relaciones_equipos | `auditoria_relaciones` | INSERT, UPDATE, DELETE |
+| equipo_areas_usuarias | `auditoria_equipo_areas_usuarias` | INSERT, DELETE |
 
-En total se identificaron cinco disparadores, cada uno asociado a tres eventos, lo que representa 15 combinaciones de tabla y operación.
+La documentación anterior registraba cinco disparadores y 15 combinaciones de tabla y operación. Con la migración `020` el inventario es de seis disparadores y 17 combinaciones.
 
-### 5.2 Finalidad
+Los seis disparadores de `public.equipos` que deben conservarse son `asignar_actor`, `asignar_codigo_equipo`, `auditoria_equipos`, `proteger_equipos`, `set_updated_at` y `validar_cambio_asignacion_equipo`.
 
-La auditoría permite registrar operaciones efectuadas sobre información relevante del sistema y facilita la trazabilidad de los cambios.
+## 3. Inmutabilidad y bajas definitivas
 
-### 5.3 Verificación pendiente
+El disparador `proteger_auditoria`, creado por la migración `011`, rechaza cualquier `UPDATE` o `DELETE` sobre `public.auditoria`. La baja definitiva conserva las filas de auditoría y registra una constancia en `public.equipos_eliminados` con el código institucional, el estado del activo, la cantidad de fotografías, el administrador responsable y la fecha.
 
-La existencia de los disparadores fue comprobada mediante una consulta al catálogo de PostgreSQL. Aún debe verificarse mediante operaciones reales desde la aplicación que los registros se generen correctamente y que el usuario autenticado quede asociado al evento cuando corresponda.
+La función `public.eliminar_equipo_dado_de_baja(uuid, text, uuid)` es `security definer`, valida que el actor siga siendo administrador activo y solo se concede a `service_role`. El cliente la invoca indirectamente mediante la Edge Function `admin-eliminar-equipo`.
 
-### 5.4 Inmutabilidad y bajas definitivas
+La tabla `eliminaciones_pendientes` no expone políticas a `anon` ni `authenticated`: solo `service_role` puede leerla y actualizarla. La migración `017` agregó `reclamar_limpieza_equipo(uuid, uuid)` con token y vencimiento de 15 minutos.
 
-La migración `supabase/migrations/011_eliminar_equipos_dados_de_baja.sql` agrega el disparador `proteger_auditoria`, que rechaza cualquier `UPDATE` o `DELETE` sobre `public.auditoria`. La baja definitiva de un equipo conserva sus filas de auditoría y registra una constancia en `public.equipos_eliminados` con el código institucional, el snapshot del activo, la cantidad de fotografías, el administrador responsable y la fecha. De este modo, la limpieza del historial operativo no elimina la evidencia de quién autorizó la baja.
+## 4. Escrituras de mantenimientos y trazabilidad de estados
 
-La función `public.eliminar_equipo_dado_de_baja(uuid, text, uuid)` es `security definer`, valida que el actor siga siendo un administrador activo y solo se concede a `service_role`; el cliente la invoca indirectamente a través de la Edge Function `admin-eliminar-equipo`.
+La migración `013` revoca `insert`, `update` y `delete` sobre `public.mantenimientos` para `anon` y `authenticated`. Las altas y los cierres pasan por `public.registrar_mantenimiento(...)` y `public.actualizar_mantenimiento(...)`, que validan rol activo, técnico responsable, transiciones permitidas e información mínima al completar.
 
-### 5.5 Escrituras de mantenimientos y trazabilidad de estados
+La tabla `mantenimiento_cambios_estado` es de solo lectura para los clientes. Sus filas incluyen motivo, usuario y fecha. Las transiciones son `pendiente → en_proceso`, `pendiente → completado` y `en_proceso → completado`. El equipo no puede quedar en `en_mantenimiento` al completar la intervención.
 
-La migración `supabase/migrations/013_cierre_mantenimientos.sql` revoca `insert`, `update` y `delete` sobre `public.mantenimientos` para `anon` y `authenticated`. Las altas y los cierres pasan exclusivamente por `public.registrar_mantenimiento(...)` y `public.actualizar_mantenimiento(...)`, ambas `security definer`, que validan el rol activo, el técnico responsable, las transiciones permitidas y la información mínima para completar. La tabla `mantenimiento_cambios_estado` es de solo lectura para los clientes; sus filas las insertan esas funciones e incluyen el motivo, el usuario y la fecha. La misma migración recrea de forma idempotente los disparadores de auditoría de `equipos`, `mantenimientos`, `componentes`, `relaciones_equipos` y `movimientos`.
+## 5. Movimientos
+
+La migración `010` revoca inserción, actualización y eliminación directas sobre `public.movimientos` para `authenticated`. El historial se escribe mediante `public.registrar_movimiento(...)`, que valida rol `admin` o `tecnico`, equipo activo, destino y responsable vigentes, y cambio efectivo de ubicación, responsable o posición.
+
+El trigger `validar_cambio_asignacion_equipo` exige un movimiento registrado en la misma transacción para modificar `ambiente_id`, `responsable_id` o `posicion` de un equipo. Las funciones de consulta `listar_movimientos` y `listar_responsables_movimiento` requieren rol `admin` o `tecnico`.
+
+## 6. Uso compartido
+
+`equipo_areas_usuarias` tiene RLS habilitado. `authenticated` puede leer según rol (`admin`, `tecnico` o `consulta`) y existencia del equipo; las escrituras directas no están concedidas. La RPC `configurar_areas_equipo(...)` valida administrador o técnico activo, equipo activo, máximo 100 áreas, destinos válidos y configuración previa no modificada. Véase [equipos compartidos](../modulos/equipos-compartidos.md).
+
+## 7. Verificación pendiente
+
+La existencia de disparadores y políticas se comprobó mediante inspección y consultas al catálogo. Sigue pendiente ejecutar la matriz completa en un entorno de staging con el mismo esquema y al menos un usuario activo por rol, y comprobar que el usuario autenticado quede asociado a cada evento.

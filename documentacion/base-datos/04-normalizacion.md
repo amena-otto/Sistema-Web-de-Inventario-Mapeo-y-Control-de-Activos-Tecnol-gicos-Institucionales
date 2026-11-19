@@ -22,6 +22,9 @@ La información se separa según su naturaleza y responsabilidad:
 - `mantenimientos` y `movimientos` conservan el historial de operaciones.
 - `fotografias_equipos` mantiene las referencias a las fotografías.
 - `profiles` administra los perfiles institucionales.
+- `equipo_areas_usuarias` registra qué áreas utilizan un equipo sin duplicar el activo.
+- `equipos_eliminados` conserva la constancia de las bajas definitivas.
+- `eliminaciones_pendientes` coordina la limpieza diferida de archivos.
 - `auditoria` conserva el registro de cambios.
 
 Esta separación permite evitar la repetición innecesaria de datos descriptivos y facilita el mantenimiento de la información.
