@@ -7,7 +7,7 @@ No registra ejecuciones realizadas durante la reorganización documental.
 
 ## Estado y alcance de las verificaciones
 
-Este repositorio no tiene un ejecutor de pruebas automatizadas de interfaz ni credenciales de una base aislada. Por eso, las pruebas que crean o modifican datos deben ejecutarse en staging, nunca en producción. No se deben marcar como aprobadas hasta guardar evidencia de una ejecución real.
+Este repositorio no tiene un ejecutor de pruebas automatizadas de interfaz ni credenciales de un proyecto de staging. Sí dispone de pruebas aisladas con PGlite para migraciones y lógica SQL, que no se conectan a ninguna base real. Los recorridos que crean o modifican datos en el servicio desplegado deben ejecutarse en staging, nunca en producción, y no deben marcarse como aprobados hasta guardar evidencia de una ejecución real.
 
 | Área | Estado | Cómo verificar |
 |---|---|---|
@@ -17,7 +17,7 @@ Este repositorio no tiene un ejecutor de pruebas automatizadas de interfaz ni cr
 | Ubicaciones e historial de movimientos | Pendiente en staging | Cambiar ubicación y comprobar el historial |
 | Planos de piso | Capacidad de base de datos; interfaz no implementada en `src/` | La migración `005` dejó la columna y el bucket, y la `012` retiró el soporte. No existe interfaz de carga, reemplazo ni marcadores en este código. |
 | Baja definitiva de equipos | Pendiente en staging | Dar de baja, abrir el detalle, confirmar el código y comprobar `equipos_eliminados` y la auditoría |
-| Mantenimientos | Pendiente en staging | Crear, editar y comprobar el historial |
+| Mantenimientos | Lógica SQL automatizada con PGlite; recorrido visual pendiente en staging | Ejecutar `node --test tests/flujoMantenimientosAutomatico.test.mjs` y seguir la matriz del ciclo abajo |
 | QR | Pendiente en staging | Abrir el QR, seguir el enlace `.dev` e imprimir |
 | Permisos por rol | Pendiente en staging | Iniciar sesión con un usuario de cada rol |
 | Rutas públicas y destino de `/` | Automatizable (revisión) + pendiente en staging | Abrir `/` con y sin sesión: siempre pasa por `/login`, sin bucles |
@@ -40,7 +40,7 @@ Preparar datos descartables, un usuario activo de cada rol (`admin`, `tecnico`, 
 2. **Búsqueda y filtros:** buscar por código, nombre y serie; combinar categoría, ubicación y estado; limpiar filtros; comprobar que la tabla, paginación y totales coinciden con los resultados.
 3. **Estados:** comparar los conteos del dashboard con el inventario filtrado, incluidos equipos en mantenimiento, almacén, baja y archivados.
 4. **Ubicación e historial:** cambiar la ubicación desde el flujo normal de movimientos; confirmar que el equipo queda en el ambiente esperado y que el movimiento anterior y nuevo permanecen en el historial.
-5. **Mantenimientos:** registrar una intervención, asignarla a un técnico, iniciarla, completarla y editarla. Comprobar que no se puede retroceder de estado, que al completar se exigen diagnóstico, acciones y resultado, y que todo cambio de estado del equipo pide motivo y aparece en el historial con usuario y fecha. Verificar que un técnico no puede reasignar la intervención ni editar una ya completada, y que las escrituras directas sobre la tabla son rechazadas.
+5. **Mantenimientos:** buscar el equipo por escrito por nombre, código, serie, categoría y ubicación, con mayúsculas, minúsculas y tildes; comprobar teclado, ARIA, paginación y conservación de la selección. Registrar una intervención y verificar que queda `pendiente` sin cambiar el estado del equipo. Iniciarla y comprobar fecha real, usuario, estado previo y paso automático a `en_mantenimiento`. Guardar avances cronológicos, reprogramar el seguimiento e intentar editarlos. Finalizar con cada estado operativo válido y sin seleccionarlo, comprobando las validaciones. Verificar bloqueo de doble `en_proceso` con UUID del bloqueante, rechazo de cambios manuales del estado operativo, corrección administrativa con motivo, rechazo de escrituras directas, no retroceso de estado, edición de completadas solo por administrador e historial con usuario y fecha.
 6. **QR e impresión:** generar y leer un QR con cámara y desde pantalla; validar que el destino no sea `localhost`; revisar vista e impresión en una página.
 7. **Roles:** `admin` gestiona usuarios y catálogos; `tecnico` opera equipos y mantenimientos según sus permisos; `consulta` solo lee las áreas permitidas. Probar también la URL directa de cada módulo.
 8. **Importación:** descargar la plantilla; importar una fila válida, una fila incompleta, una fecha imposible, categoría/ambiente inexistente y un duplicado. Revisar el resultado por fila y confirmar que no se dupliquen registros.
@@ -54,7 +54,7 @@ No usar registros reales ni cuentas con privilegios de producción para estas pr
 
 ## Pruebas RLS
 
-El script `supabase/tests/rls.sql` cubre acceso anónimo y los roles `admin`, `tecnico` y `consulta`, incluyendo equipos, perfiles, catálogos, mantenimientos, ciclo y trazabilidad de estados, movimientos, fotografías, marcadores, autoría, inmutabilidad de la auditoría y baja definitiva. Debe ejecutarse completo desde SQL Editor en un proyecto de staging que tenga el mismo esquema/migraciones y al menos un usuario activo por rol.
+El script `supabase/tests/rls.sql` cubre acceso anónimo y los roles `admin`, `tecnico` y `consulta`, incluyendo equipos, perfiles, catálogos, mantenimientos, ciclo y trazabilidad de estados, movimientos, fotografías, marcadores, autoría, inmutabilidad de la auditoría y baja definitiva. En un entorno con la migración `021`, añadir comprobaciones de lectura de `mantenimiento_avances` y rechazo de escrituras directas. Debe ejecutarse completo desde SQL Editor en un proyecto de staging que tenga el mismo esquema/migraciones y al menos un usuario activo por rol.
 
 El script crea fixtures y hace pruebas de escritura dentro de bloques PL/pgSQL que revierten sus cambios al terminar. Aun así, no ejecutarlo en producción: requiere privilegios SQL y puede fallar si el esquema de staging no coincide. Revisar que el resultado no contenga filas `FALLA`; un error de ejecución no equivale a una prueba aprobada.
 
@@ -80,6 +80,6 @@ Para validar el plan gratuito, registrar semanalmente en Supabase **Settings →
 
 ## CI
 
-El workflow `.github/workflows/ci.yml` instala dependencias con `npm ci`, ejecuta `npm test`, lint, build y `deno check` sobre todas las Edge Functions. Las variables Supabase de compilación son valores ficticios no funcionales; no se guardan secretos de producción en el workflow. Las pruebas automáticas incluyen utilidades de inventario/CSV, los helpers de limpieza por lotes y pruebas de integración SQL con PGlite sobre las migraciones `015` y `016` (idempotencia, triggers, RPC y permisos de la tabla de limpieza diferida). El estado de la matriz funcional, RLS en un proyecto real y la restauración siguen requiriendo evidencia manual de staging.
+El workflow `.github/workflows/ci.yml` instala dependencias con `npm ci`, ejecuta `npm test`, lint, build y `deno check` sobre todas las Edge Functions. Las variables Supabase de compilación son valores ficticios no funcionales; no se guardan secretos de producción en el workflow. Las pruebas automáticas incluyen utilidades de inventario/CSV, los helpers de limpieza por lotes y pruebas de integración SQL con PGlite sobre las migraciones `015`, `016` y `021`. Estas últimas cubren el ciclo automático de mantenimientos: idempotencia, alta pendiente, inicio atómico, avances inmutables, cierre, búsqueda sin tildes, protecciones, rollback, RLS y conservación de duplicados históricos. La ejecución local de `npm test` registró 152 pruebas aprobadas y cero fallos. El estado de la matriz funcional, RLS en un proyecto real y la restauración siguen requiriendo evidencia manual de staging.
 
 El informe de cierre con las matrices RB-01…RB-12 y CA-01…CA-16, los hallazgos, el estado de las validaciones y el veredicto técnico se conserva como evidencia histórica en [auditoría de cierre](../historico/auditoria-cierre-2026-10-25.md). Sus cifras y redacción corresponden al 25 de octubre de 2026.

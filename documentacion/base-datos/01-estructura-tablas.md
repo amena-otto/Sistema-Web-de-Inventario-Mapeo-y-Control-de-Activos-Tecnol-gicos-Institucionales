@@ -21,13 +21,14 @@ Las migraciones del repositorio describen las siguientes tablas activas:
 7. equipos
 8. equipos_eliminados
 9. fotografias_equipos
-10. mantenimiento_cambios_estado
-11. mantenimientos
-12. movimientos
-13. pabellones
-14. pisos
-15. profiles
-16. relaciones_equipos
+10. mantenimiento_avances
+11. mantenimiento_cambios_estado
+12. mantenimientos
+13. movimientos
+14. pabellones
+15. pisos
+16. profiles
+17. relaciones_equipos
 
 La migración `005_mapeo_institucional.sql` creó además `marcadores_mapa`, pero no existe código en `src/` que la utilice. La migración `015` retiró el trigger dependiente cuando la tabla no estaba presente, y el registro operativo del 7 de noviembre de 2026 confirma su ausencia en el entorno revisado. Puede persistir en instalaciones antiguas.
 
@@ -73,3 +74,12 @@ Las migraciones `015`, `016` y `017` corrigen y refuerzan la eliminación defini
 La migración `019_oficinas_independientes.sql` permite `NULL` en piso y código de los ambientes, agrega `icono` y reglas para escrituras futuras. No contiene `INSERT`, `UPDATE` ni `DELETE` sobre registros existentes.
 
 La migración `020_equipos_compartidos.sql` crea `equipo_areas_usuarias`, su índice, RLS, trigger de auditoría y la RPC `configurar_areas_equipo`. No modifica equipos, ubicaciones ni movimientos. Véase [equipos compartidos](../modulos/equipos-compartidos.md).
+
+La migración `021_flujo_mantenimientos_automatico.sql` agrega a
+`mantenimientos` las columnas anulables `estado_operativo_anterior`,
+`fecha_inicio_real`, `fecha_finalizacion_real`, `iniciado_por`,
+`finalizado_por` y `proximo_seguimiento`. Crea `mantenimiento_avances` con su
+índice cronológico, RLS de solo lectura y protección contra edición o borrado.
+Añade un índice único parcial, triggers de validación y las RPC del ciclo. No
+reescribe migraciones históricas ni modifica registros existentes. Véase
+[mantenimientos](../modulos/mantenimientos.md).

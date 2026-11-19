@@ -23,7 +23,7 @@ Los roles son `admin`, `tecnico` y `consulta`. Una cuenta inactiva deja de satis
 | relaciones_equipos | `auditoria_relaciones` | INSERT, UPDATE, DELETE |
 | equipo_areas_usuarias | `auditoria_equipo_areas_usuarias` | INSERT, DELETE |
 
-La documentación anterior registraba cinco disparadores y 15 combinaciones de tabla y operación. Con la migración `020` el inventario es de seis disparadores y 17 combinaciones.
+La documentación anterior registraba cinco disparadores y 15 combinaciones de tabla y operación. Con la migración `020` el inventario pasó a seis disparadores y 17 combinaciones; la migración `021` añade `auditoria_mantenimiento_avances` para inserciones, por lo que el inventario actual es de siete disparadores y 18 combinaciones.
 
 Los seis disparadores de `public.equipos` que deben conservarse son `asignar_actor`, `asignar_codigo_equipo`, `auditoria_equipos`, `proteger_equipos`, `set_updated_at` y `validar_cambio_asignacion_equipo`.
 
@@ -39,7 +39,9 @@ La tabla `eliminaciones_pendientes` no expone políticas a `anon` ni `authentica
 
 La migración `013` revoca `insert`, `update` y `delete` sobre `public.mantenimientos` para `anon` y `authenticated`. Las altas y los cierres pasan por `public.registrar_mantenimiento(...)` y `public.actualizar_mantenimiento(...)`, que validan rol activo, técnico responsable, transiciones permitidas e información mínima al completar.
 
-La tabla `mantenimiento_cambios_estado` es de solo lectura para los clientes. Sus filas incluyen motivo, usuario y fecha. Las transiciones son `pendiente → en_proceso`, `pendiente → completado` y `en_proceso → completado`. El equipo no puede quedar en `en_mantenimiento` al completar la intervención.
+La tabla `mantenimiento_cambios_estado` es de solo lectura para los clientes. Sus filas incluyen motivo, usuario y fecha. Con la migración `021` el ciclo se separa en `iniciar_mantenimiento` (registra fecha real, usuario, estado previo y transición a `en_mantenimiento`), `guardar_avance_mantenimiento` (avances inmutables) y `finalizar_mantenimiento` (exige diagnóstico, acciones, resultado y estado operativo final explícito entre `operativo`, `con_fallas` e `inoperativo`). El equipo no puede quedar en `en_mantenimiento` al completar la intervención.
+
+La migración `021` también crea `mantenimiento_avances`: RLS de solo lectura para `authenticated`, auditoría en inserción y un trigger que rechaza actualizaciones y borrados. Un índice único parcial y su trigger impiden dos intervenciones `en_proceso` por equipo; si hay duplicados históricos, el índice se omite sin alterar filas. Un trigger diferido sobre `equipos` bloquea cambios manuales del estado operativo mientras haya una intervención abierta, salvo que la transacción registre la transición; las operaciones sin sesión conservan su comportamiento. La RPC `corregir_estado_operativo_en_mantenimiento` permite la excepción administrativa solo con motivo y auditoría. Todas estas funciones son `security definer`, usan `search_path = ''` y conceden ejecución únicamente a `authenticated`.
 
 ## 5. Movimientos
 

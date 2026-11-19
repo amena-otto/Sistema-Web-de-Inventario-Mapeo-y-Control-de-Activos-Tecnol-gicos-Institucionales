@@ -31,7 +31,7 @@ Revisa el archivo generado y aplícalo como primera migración. Requiere acceso 
 
 Para el bloque de estabilización de eliminación de equipos, el registro del 7 de noviembre de 2026 documenta el orden `015`, `016` y `017`, sus comprobaciones y los bloqueos previos a producción; véase [despliegue controlado de la estabilización](./despliegue-eliminacion-equipos.md).
 
-La numeración `018` está reservada en los informes históricos para un trabajo de códigos por categoría que no está incluido en este repositorio. Las migraciones presentes `019` y `020` corresponden a oficinas independientes y áreas usuarias; deben revisarse contra el esquema de destino antes de aplicarlas.
+La numeración `018` está reservada en los informes históricos para un trabajo de códigos por categoría que no está incluido en este repositorio. Las migraciones presentes `019` y `020` corresponden a oficinas independientes y áreas usuarias; deben revisarse contra el esquema de destino antes de aplicarlas. La migración `021` incorpora el ciclo automático de mantenimientos, la tabla `mantenimiento_avances` y las RPC del flujo: aplícala primero en un entorno aislado, comprueba que no existen duplicados `en_proceso` que impidan el índice único y verifica disparadores, RLS y permisos antes de cualquier publicación. No se ejecutó contra producción durante esta integración.
 
 ## Frontend
 

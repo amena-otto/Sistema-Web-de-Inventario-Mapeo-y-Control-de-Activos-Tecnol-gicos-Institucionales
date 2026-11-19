@@ -3,49 +3,99 @@
 ## 1. Objetivo y alcance
 
 Registrar el ciclo completo de intervenciones sobre activos: programación,
-asignación de técnico, ejecución, cierre, cambio del estado operativo del
-equipo y trazabilidad de cada transición. Ruta: `/mantenimientos`.
+búsqueda escrita del equipo, ejecución, avances, cierre, actualización
+automática del estado operativo y trazabilidad. Ruta: `/mantenimientos`.
 
-Este documento consolida la información que antes estaba repartida en el
-README, `documentacion/auditoria-cierre.md` y la documentación de base de datos.
-La fuente de comportamiento es el código y las migraciones `008`, `009` y `013`.
+Este es el documento principal del módulo. Consolida la información que antes
+estaba repartida en el README, informes históricos, documentación de base de
+datos y el documento temporal `docs/FLUJO_MANTENIMIENTOS_AUTOMATICO.md`, que
+fue integrado aquí y eliminado. Las fuentes de comportamiento son el código y
+las migraciones `008`, `009`, `013` y, para el ciclo automático, `021`.
 
-## 2. Funcionalidades implementadas
+## 2. Flujo obligatorio
 
-- Mantenimientos **preventivos** y **correctivos**.
-- Alta con equipo, tipo, fecha, problema reportado y estado inicial.
-- Asignación de técnico responsable: el técnico se registra a sí mismo; un
-  administrador puede asignar o reasignar a otro técnico activo.
-- Registro de intervención: diagnóstico, acciones realizadas, componentes
-  reemplazados, resultado y observaciones.
-- Próxima revisión y cálculo de revisiones vencidas.
-- Estados `pendiente`, `en_proceso` y `completado` con transiciones forward-only.
-- Acciones de interfaz «Iniciar» (a `en_proceso`) y «Registrar realizado» (a
-  `completado`), además de edición.
-- Cambio del estado operativo del equipo desde el alta o la actualización,
-  siempre con motivo.
-- Historial de transiciones con estado anterior y nuevo de la intervención y
-  del equipo, motivo, usuario y fecha.
-- Indicadores, filtros, orden y paginación.
-- Historial por equipo en su ficha y exportación desde
-  [Reportes](./reportes.md).
+### 2.1 Registrar
 
-## 3. Flujo de funcionamiento
+- El formulario exige buscar y seleccionar el equipo **por escrito**.
+- La intervención se guarda siempre como `pendiente`.
+- No se muestra selector del estado operativo; el alta **no modifica** el
+  estado del equipo.
+- Se registran tipo, fecha programada, problema reportado, técnico
+  responsable, próxima revisión y observaciones opcionales.
+- En la misma transacción se inserta la fila de alta en
+  `mantenimiento_cambios_estado`, con el estado operativo del equipo sin
+  cambios.
 
-1. **Alta.** El formulario elige equipo y tipo, fecha, problema, datos
-   opcionales de intervención, próxima revisión, técnico responsable y, si
-   aplica, estado operativo destino con su motivo. `guardar` fuerza
-   `estado: 'pendiente'` antes de llamar a `registrar_mantenimiento`.
-2. **Inicio.** El responsable o un administrador abre una intervención pendiente
-   con «Iniciar»; la RPC la pasa a `en_proceso`.
-3. **Ejecución/cierre.** «Registrar realizado» exige diagnóstico, acciones y
-   resultado; la RPC pasa a `completado` y verifica que el equipo no quede en
-   `en_mantenimiento`.
-4. **Edición.** El responsable o un administrador puede editar datos; solo un
-   administrador puede editar una intervención completada.
-5. **Trazabilidad.** Cada cambio de estado de la intervención o del equipo
-   inserta una fila en `mantenimiento_cambios_estado` dentro de la misma
-   transacción.
+### 2.2 Iniciar
+
+`Iniciar mantenimiento` pide confirmación y ejecuta una sola transacción que:
+
+1. Pasa la intervención de `pendiente` a `en_proceso`.
+2. Guarda `fecha_inicio_real` e `iniciado_por` con valores reales.
+3. Conserva el estado operativo previo en `estado_operativo_anterior`.
+4. Pone el equipo en `en_mantenimiento` automáticamente.
+5. Inserta la transición en `mantenimiento_cambios_estado`.
+
+La interfaz no solicita el estado operativo: lo determine la base de datos.
+
+### 2.3 Durante el proceso
+
+- La intervención permanece `en_proceso` y el equipo `en_mantenimiento`.
+- «Guardar avance» crea una fila cronológica en `mantenimiento_avances` con
+  descripción, diagnóstico, acciones, componentes, observaciones, usuario y
+  fecha real.
+- Los avances son **inmutables**: un trigger rechaza `UPDATE` y `DELETE`.
+  Guardar otro avance no sobrescribe ni reinicia el anterior.
+- La casilla «Establecer o modificar la próxima fecha de seguimiento»
+  actualiza `proximo_seguimiento`; sin ella, cada avance conserva su propio
+  valor histórico sin alterar el de la intervención.
+- No se ofrece seleccionar el estado final durante el seguimiento.
+- «Editar programación» no está disponible para intervenciones `en_proceso`.
+
+### 2.4 Finalizar
+
+«Finalizar mantenimiento» exige:
+
+- Diagnóstico.
+- Acciones realizadas.
+- Resultado.
+- Selección **explícita** del estado operativo final entre `operativo`,
+  `con_fallas` e `inoperativo`. El selector nace vacío: finalizar no implica
+  que el equipo quedó operativo.
+
+La RPC `finalizar_mantenimiento` valida esos datos y, en una transacción,
+registra `fecha_finalizacion_real` y `finalizado_por`, escribe la transición y
+el historial, limpia `proximo_seguimiento`, actualiza la próxima revisión
+preventiva si se indicó, cierra la intervención como `completado` y aplica al
+equipo el estado elegido. `en_mantenimiento` no es un estado final admitido.
+
+## 3. Búsqueda escrita de equipos
+
+El formulario de registro usa `SearchableSelect` en modo remoto con la RPC
+`buscar_equipos_mantenimiento`:
+
+- Coincidencias parciales, sin distinguir mayúsculas, minúsculas ni tildes,
+  mediante `normalizar_busqueda_mantenimientos` en PostgreSQL y
+  `normalizarTexto` en el filtro local del componente.
+- Busca por nombre, código institucional, número de serie, categoría y
+  ubicación. La RPC también considera marca, modelo, código patrimonial,
+  ambiente, piso y pabellón.
+- Cada resultado muestra nombre y código, con serie, ubicación y categoría
+  como detalle.
+- Los términos separados por espacios deben coincidir todos.
+- Navegación con `ArrowDown`, `ArrowUp`, `Enter` y `Escape`; el componente
+  expone `combobox`, `listbox`, `option`, `aria-activedescendant` y
+  `aria-expanded`.
+- La petición se debouncea 250 ms, se pagina en bloques de 20 resultados y el
+  servidor limita cada página a 100 filas. «Cargar más resultados» acumula la
+  página siguiente.
+- La selección se mantiene visible aunque el equipo salga de la página actual
+  gracias a `selectedLabel`.
+
+`SearchableSelect` conserva su API anterior: los selectores de filtros,
+movimientos y otros formularios siguen filtrando en local. Las props nuevas
+(`remoto`, `onBuscar`, `detalle`, `selectedLabel`, `onCargarMas`, `hayMas`,
+`buscando`) son opcionales y solo se usan en este registro.
 
 ## 4. Roles y permisos
 
@@ -55,175 +105,205 @@ Claves de `usePermissions.ts`: `mantenimientos.ver` y
 | Acción | Admin | Técnico |
 |---|---|---|
 | Ver listado, historial e indicadores | Sí | Sí |
-| Registrar intervención | Sí | Sí, solo como responsable |
+| Registrar intervención | Sí | Sí |
+| Buscar equipos mediante la RPC | Sí | Sí |
 | Asignar/reasignar técnico | Sí | No |
-| Iniciar o cerrar la intervención que tiene asignada | Sí | Sí |
+| Iniciar, avanzar o finalizar la intervención asignada | Sí | Sí, solo la propia |
+| Registrar avances de la intervención asignada | Sí | Sí, solo la propia |
 | Editar intervención completada | Sí | No |
-| Cambiar estado operativo del equipo | Sí, con motivo | Sí, con motivo |
+| Cambiar estado operativo durante una intervención abierta | Solo con corrección auditada y motivo | No |
 
-La RPC valida el rol activo en servidor. Las escrituras directas sobre
-`public.mantenimientos` están revocadas para `anon` y `authenticated` (migración
-013), de modo que ningún cliente puede alterar estados sin pasar por las
-funciones transaccionales.
+Las funciones `security definer` validan sesión y rol activo con
+`private.tiene_rol(...)`. Las escrituras directas sobre `mantenimientos` están
+revocadas para `anon` y `authenticated` desde la migración `013`; la tabla de
+avances solo permite lectura a `authenticated` desde la migración `021`. La
+interfaz no es la única barrera.
 
-## 5. Formularios y campos
+## 5. Datos y estructura
 
-| Campo | Uso | Obligatoriedad |
-|---|---|---|
-| `equipo_id` | Activo intervenido, de `equipos` con `situacion = 'activo'` | Sí |
-| `tipo` | `preventivo` / `correctivo` | Sí |
-| `fecha_mantenimiento` | Fecha de la intervención | Sí (default `current_date`) |
-| `problema_reportado` | Motivo o falla informada; se refleja en `descripcion` | Sí |
-| `diagnostico` | Causa determinada | Obligatorio al completar |
-| `acciones_realizadas` | Trabajo efectuado | Obligatorio al completar |
-| `componentes_reemplazados` | Repuestos, texto libre | No |
-| `resultado` | Resultado de la intervención | Obligatorio al completar |
-| `observaciones` | Notas adicionales | No |
-| `proxima_revision` | Fecha de la siguiente revisión | No; no puede ser anterior a la fecha |
-| `estado` | Estado de la intervención | Sí |
-| `responsable_id` | Técnico activo | Sí (por defecto, quien registra) |
-| `p_estado_equipo` / `p_motivo` | Estado operativo destino y motivo | El motivo es obligatorio si el estado cambia |
+### 5.1 Campos del ciclo
 
-## 6. Validaciones y reglas de negocio
+| Campo | Significado |
+|---|---|
+| `fecha_mantenimiento` | Fecha **programada**; no es la fecha real de inicio ni de cierre |
+| `fecha_inicio_real` | Fecha y hora reales del inicio, con `iniciado_por` |
+| `fecha_finalizacion_real` | Fecha y hora reales del cierre, con `finalizado_por` |
+| `estado_operativo_anterior` | Estado del equipo inmediatamente antes de iniciar |
+| `proximo_seguimiento` | Seguimiento de la intervención abierta; se limpia al cerrar |
+| `proxima_revision` | Revisión preventiva posterior al cierre |
+
+Los campos nuevos son anulables: las intervenciones históricas conservan
+`NULL` y no se inventan fechas ni estados.
+
+### 5.2 Tablas
+
+- `mantenimientos` y `mantenimiento_cambios_estado` (008 y 013).
+- `mantenimiento_avances` (021): avances cronológicos e inmutables, con RLS
+  de solo lectura para `authenticated`, índice por intervención y fecha,
+  auditoría en inserción y protección contra edición o borrado.
+- `equipos`, `profiles` y `auditoria`.
+
+### 5.3 Funciones
+
+- 008/009/013: `registrar_mantenimiento`, `actualizar_mantenimiento`,
+  `listar_tecnicos_mantenimiento`, `indicadores_mantenimiento` y
+  `equipos_revision_vencida`.
+- 021: `iniciar_mantenimiento`, `guardar_avance_mantenimiento`,
+  `finalizar_mantenimiento`, `buscar_equipos_mantenimiento`,
+  `normalizar_busqueda_mantenimientos` y
+  `corregir_estado_operativo_en_mantenimiento`. Las firmas de registro y
+  actualización se reemplazan para ajustarlas al nuevo ciclo.
+
+Todas las RPC del flujo conceden ejecución solo a `authenticated`.
+
+### 5.4 Protecciones en base de datos
+
+- Un índice único parcial y un trigger impiden una segunda intervención
+  `en_proceso` por equipo. El error incluye el UUID de la intervención
+  bloqueante y la interfaz ofrece ver el historial filtrado de ese equipo.
+- Si existen duplicados `en_proceso` anteriores a la migración, se omite el
+  índice y se avisa; **no se eliminan ni corrigen** registros históricos.
+- Un trigger diferido sobre `equipos.estado_operativo` rechaza cambios
+  manuales con sesión mientras exista una intervención abierta, salvo que la
+  transacción registre la transición correspondiente.
+- Las operaciones sin sesión, como la baja definitiva, conservan su
+  comportamiento.
+- `corregir_estado_operativo_en_mantenimiento` es una salida administrativa
+  de base de datos: exige rol `admin`, estado válido y motivo; escribe la
+  transición auditada. No tiene botón propio en la interfaz actual.
+- Cada RPC bloquea las filas afectadas y revierte todos sus cambios si falla
+  cualquier validación.
+
+## 6. Validaciones y transiciones
 
 **Frontend (`Mantenimientos.tsx`)**
 
-- El alta siempre se guarda como `pendiente`; si el formulario marca
-  `completado`, se muestra un error.
-- Próxima revisión no anterior a la fecha del mantenimiento.
-- Cambiar el estado operativo exige motivo.
-- Al completar se exigen diagnóstico, acciones y resultado; si se había
-  seleccionado `en_mantenimiento`, el formulario lo cambia automáticamente a
-  `operativo`.
-- Edición restringida al responsable o administrador; las completadas, solo a
-  administrador.
+- El alta envía `estado: 'pendiente'` y no ofrece estado operativo.
+- Validan equipo seleccionado, problema reportado, próxima revisión no
+  anterior a la fecha programada, descripción del avance, fecha de
+  seguimiento válida y campos obligatorios del cierre.
+- Inicio, avance, cierre y edición están restringidos por rol y responsable.
+- Los errores de RPC se muestran al usuario y no marcan éxito.
 
-**Base de datos (migraciones 008, 009 y 013)**
+**Transiciones de la intervención**
 
-- `registrar_mantenimiento(...)`: verifica sesión y rol `admin`/`tecnico`
-  activo; tipo y estado válidos; fecha y problema no vacíos; próxima revisión no
-  anterior a la fecha; datos mínimos al completar; responsable activo; equipo
-  activo (bloqueo `FOR UPDATE`); equipo no puede quedar en `en_mantenimiento` al
-  completar; motivo obligatorio si cambia el estado del equipo. Inserta la
-  intervención, actualiza el equipo y registra la transición en una transacción.
-- `listar_tecnicos_mantenimiento()` (009): devuelve `id`, `nombres`,
-  `apellidos` y `activo` para roles `admin`/`tecnico`; la interfaz etiqueta los
-  inactivos y los conserva para leer historial.
-- `actualizar_mantenimiento(...)`: valida rol, autoría (responsable o admin),
-  edición de completadas solo por admin, transiciones permitidas, campos
-  obligatorios, responsable activo solo si cambia, equipo activo y motivo de
-  cambio de estado.
-- `indicadores_mantenimiento()` y `equipos_revision_vencida()`: solo equipos
-  activos; revisión vencida = `proxima_revision <= current_date` y estado
-  distinto de `completado`.
-- `mantenimiento_cambios_estado` es de solo lectura para clientes; solo la
-  escriben las RPC.
+| Estado anterior | Estados destino | Mecanismo |
+|---|---|---|
+| `pendiente` | `en_proceso` | `iniciar_mantenimiento` |
+| `en_proceso` | `completado` | `finalizar_mantenimiento` |
+| `pendiente` / `en_proceso` / `completado` | El mismo | `actualizar_mantenimiento` (edición ordinaria o corrección administrativa) |
 
-**Transiciones permitidas**
+No se permite retroceder ni cambiar de estado desde el formulario de
+edición. La RPC de actualización rechaza cualquier estado distinto del
+actual.
 
-| Estado anterior | Estados destino |
-|---|---|
-| `pendiente` | `en_proceso`, `completado` |
-| `en_proceso` | `completado` |
-| `completado` | Ninguno (solo edición por administrador, sin cambio de estado) |
+**Estado operativo del equipo**
 
-No se permite retroceder. Toda transición queda registrada con usuario y fecha.
+- El alta lo conserva.
+- `Iniciar` lo pone en `en_mantenimiento`.
+- Los avances lo mantienen en `en_mantenimiento`.
+- `Finalizar` aplica `operativo`, `con_fallas` o `inoperativo`, elegidos
+  explícitamente.
 
-## 7. Estados y transiciones (equipo)
+## 7. Auditoría e historial
 
-Los estados operativos destino son `operativo`, `con_fallas`,
-`en_mantenimiento`, `inoperativo` y `en_almacen`. Al completar no se admite
-`en_mantenimiento`. Cualquier cambio respecto al estado anterior exige motivo y
-se registra en `mantenimiento_cambios_estado` junto con la transición de la
-intervención.
+Cada alta, inicio, cierre y corrección escribe `mantenimiento_cambios_estado`
+con estado anterior y nuevo de la intervención y del equipo, motivo, usuario y
+fecha. La tabla es de solo lectura para clientes. Los avances generan
+adicionalmente una fila en `auditoria` al insertarse y no pueden modificarse
+después. La tarjeta de cada intervención muestra avances, fechas reales,
+usuario responsable de cada transición y el detalle del historial.
 
 ## 8. Integración con otros módulos
 
-- [Equipos](./equipos.md): historial en la ficha y cambio de estado operativo.
+- [Equipos](./equipos.md): historial en la ficha y estado operativo.
 - [Dashboard](./dashboard.md): indicadores de mantenimiento.
-- [Reportes](./reportes.md): exportación con técnico, componentes, resultado,
-  observaciones, estado del equipo y transiciones.
+- [Reportes](./reportes.md): exportación de intervenciones y transiciones.
 - [Usuarios y permisos](./usuarios-permisos.md): roles, cuentas activas y RLS.
 
-## 9. Tablas y funciones utilizadas
+## 9. Listado, filtros e indicadores
 
-- Tablas: `mantenimientos`, `mantenimiento_cambios_estado`, `equipos`,
-  `profiles`, `auditoria`.
-- Funciones: `registrar_mantenimiento`, `actualizar_mantenimiento`,
-  `listar_tecnicos_mantenimiento`, `indicadores_mantenimiento` y
-  `equipos_revision_vencida`.
-- Índices: por fecha, equipo/fecha, responsable/fecha, próxima revisión y los
-  dos índices de `mantenimiento_cambios_estado`.
+Los filtros visibles son **equipo**, **técnico responsable**, **estado de la
+intervención**, **tipo**, **desde** y **hasta**, con «Actualizar», «Ver
+historial completo» / «Ver últimos registros» y «Limpiar filtros». Los filtros
+`estadoEquipo` y `revision=vencida` se aceptan por parámetros de URL y por el
+servicio, pero no tienen control visible.
+
+Indicadores: equipos pendientes, equipos en proceso, equipos con revisión
+vencida e intervenciones del mes. Orden por fecha de creación o de
+mantenimiento, y paginación de 10 registros por página.
+
+## 10. Archivos y migraciones relacionadas
+
+- `src/pages/Mantenimientos.tsx` — interfaz del ciclo completo.
+- `src/services/mantenimientosService.ts` — tipos, búsqueda remota y RPC.
+- `src/components/SearchableSelect.tsx` — selector compartido con búsqueda
+  local y remota, navegación por teclado y atributos ARIA.
+- `supabase/migrations/008_modulo_mantenimientos.sql`.
+- `supabase/migrations/009_tecnicos_activos_mantenimiento.sql`.
+- `supabase/migrations/013_cierre_mantenimientos.sql`.
+- `supabase/migrations/021_flujo_mantenimientos_automatico.sql` — incremental,
+  idempotente y sin operaciones destructivas sobre datos existentes.
+- `tests/flujoMantenimientosAutomatico.test.mjs` — 14 pruebas aisladas con
+  PGlite.
 
 Especificación en [estructura de tablas](../base-datos/01-estructura-tablas.md),
 [relaciones y restricciones](../base-datos/02-relaciones-y-restricciones.md) y
-[seguridad RLS](../base-datos/03-seguridad-rls-y-auditoria.md). No se reproducen
-consultas SQL completas aquí.
+[seguridad RLS](../base-datos/03-seguridad-rls-y-auditoria.md).
 
-## 10. Archivos y funciones relacionadas
+La migración `021` debe aplicarse primero en un entorno aislado con una copia
+del esquema real, verificando duplicados `en_proceso`, disparadores, permisos y
+la plantilla de roles. No se ejecutó contra la base real durante este trabajo.
 
-- `src/pages/Mantenimientos.tsx` — formularios, filtros, tarjetas y acciones.
-- `src/services/mantenimientosService.ts` — tipos, listado paginado y llamadas
-  a RPC.
-- `supabase/migrations/008_modulo_mantenimientos.sql` — columnas, índices y
-  registro inicial.
-- `supabase/migrations/009_tecnicos_activos_mantenimiento.sql` — técnicos
-  activos/inactivos.
-- `supabase/migrations/013_cierre_mantenimientos.sql` — cierre, transiciones,
-  trazabilidad, indicadores y bloqueo de escrituras.
-- `supabase/tests/rls.sql` — matrices RLS de mantenimiento y ciclo.
+## 11. Limitaciones reales
 
-## 11. Filtros, búsquedas, indicadores y paginación
-
-Los filtros visibles son **equipo**, **técnico responsable**, **estado de la
-intervención**, **tipo**, **desde** y **hasta**, con botones «Actualizar»,
-«Ver historial completo» / «Ver últimos registros» y «Limpiar filtros». El
-filtro de **estado del equipo** (`estadoEquipo`) y el de **revisión vencida**
-(`revision=vencida`) se aceptan por parámetros de URL y por el servicio, pero
-no tienen control visible en la interfaz actual.
-
-Indicadores: equipos pendientes, equipos en proceso, equipos con revisión
-vencida e intervenciones del mes. Orden por fecha de creación o de mantenimiento
-(más reciente primero). Paginación de **10 registros por página** con control de
-páginas.
-
-## 12. Limitaciones conocidas
-
-- Frontend y base de datos no aceptan exactamente los mismos estados de alta:
-  la RPC admite `en_proceso` y `completado`, la interfaz solo `pendiente`.
 - Los filtros `estadoEquipo` y `revisionVencida` solo son accesibles por URL.
-- «Revisión vencida» no significa «última intervención completada vencida»: se
-  cuentan intervenciones no completadas con fecha pasada.
-- `descripcion` se mantiene como espejo de `problema_reportado` por
-  compatibilidad con registros históricos.
+- «Revisión vencida» cuenta intervenciones no completadas con fecha pasada;
+  no significa «última intervención completada vencida».
+- `descripcion` se conserva como espejo de `problema_reportado` por
+  compatibilidad histórica.
 - Un técnico inactivo puede aparecer en el historial, pero no se le puede
   asignar una intervención nueva.
+- La corrección administrativa del estado operativo existe en base de datos,
+  pero no tiene un botón dedicado en la interfaz.
+- Si había duplicados `en_proceso`, el índice único no se crea; la protección
+  sigue vigente en el trigger, pero conviene revisar esos datos antes de
+  publicar.
+- No hay pruebas automatizadas de navegador: teclado, ARIA, diseño móvil y
+  selección visual requieren verificación manual en staging.
+- La instalación real debe confirmar que `021` no fue aplicada antes y que la
+  plantilla de permisos coincide con la reproducida en PGlite.
 
-## 13. Pruebas realizadas y pendientes
+## 12. Pruebas
 
-**Realizadas o registradas en entregas anteriores**
+**Ejecutadas localmente**
 
-- Corrección de indicadores, transiciones, validaciones, trazabilidad y bloqueo
-  de escrituras incorporada con la migración 013 y verificada por inspección y
-  validaciones locales; detalle en el
-  [informe de auditoría](../historico/auditoria-cierre-2026-10-25.md).
-- Matriz automatizada general registrada como 137 pruebas aprobadas, una
-  omitida y cero fallos en el
-  [registro de equipos compartidos](../historico/entrega-equipos-compartidos.md).
-  No es una prueba exclusiva de mantenimientos.
+- `npm run lint`: correcto.
+- `npm run build`: correcto.
+- `node --test tests/flujoMantenimientosAutomatico.test.mjs`: 14/14
+  aprobadas. Cubren idempotencia de `021`, campos nulos en históricos, alta
+  pendiente sin tocar el equipo, inicio atómico con auditoría, bloqueo de
+  doble `en_proceso` con UUID, avances inmutables y sin reinicio, cierre
+  inválido y válido, búsqueda sin tildes por todos los campos, paginación y
+  límite, protección del estado operativo, excepción administrativa,
+  rollback transaccional, RLS y conservación de duplicados históricos.
+- `npm test`: 152/152 aprobadas, cero fallos. Incluye las 14 pruebas nuevas.
 
 **Pendientes en staging**
 
-- Ciclo completo: asignación, inicio, cierre con datos obligatorios, motivo de
-  cambio de estado, edición de completadas solo por admin y rechazo de
-  escrituras directas.
-- Ejecutar `supabase/tests/rls.sql` completo y comprobar que no devuelve filas
-  `FALLA`.
-- Verificar los indicadores frente a datos de prueba.
+- Aplicar `021` sobre una copia del esquema real y comprobar duplicados
+  `en_proceso`, triggers, RLS, firma y permisos de RPC.
+- Revisar visualmente el selector y el ciclo completo en escritorio y móvil,
+  incluidos teclado, ARIA y conservación de la selección.
+- Confirmar que indicadores, filtros y reportes reflejan `pendiente`,
+  `en_proceso` y `completado` tras la migración.
+- Ejecutar `supabase/tests/rls.sql` completo y comprobar que no devuelve
+  filas `FALLA`.
 
-## 14. Referencias
+## 13. Referencias
 
 - [Equipos](./equipos.md)
 - [Usuarios y permisos](./usuarios-permisos.md)
 - [Plan de pruebas](../pruebas/plan-pruebas.md)
-- [Discrepancias conocidas](../discrepancias-conocidas.md) — numerales 2, 3 y 5.
+- [Publicación y operaciones](../operaciones/despliegue.md)
+- [Discrepancias conocidas](../discrepancias-conocidas.md) — numerales 2, 3, 5 y 6.
