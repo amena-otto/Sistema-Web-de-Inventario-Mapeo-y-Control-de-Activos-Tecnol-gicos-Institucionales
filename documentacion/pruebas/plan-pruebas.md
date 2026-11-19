@@ -1,4 +1,9 @@
-# Fase 11: pruebas, seguridad y respaldos
+# Plan de pruebas y verificaciones
+
+Este plan consolida la fase 11 de pruebas, seguridad y respaldos con las
+verificaciones posteriores documentadas en el repositorio. Distingue lo que puede
+ejecutarse de forma automatizable de lo que requiere evidencia real en staging.
+No registra ejecuciones realizadas durante la reorganización documental.
 
 ## Estado y alcance de las verificaciones
 
@@ -10,7 +15,7 @@ Este repositorio no tiene un ejecutor de pruebas automatizadas de interfaz ni cr
 | Reglas ESLint | Automatizable | `npm run lint` |
 | CRUD, búsqueda, filtros, estados y totales | Pendiente en staging | Seguir la matriz funcional de abajo |
 | Ubicaciones e historial de movimientos | Pendiente en staging | Cambiar ubicación y comprobar el historial |
-| Planos de piso | Pendiente en staging | Cargar, reemplazar y eliminar un plano; comprobar `pisos.plano_storage_path` y el objeto del bucket `planos-institucionales` |
+| Planos de piso | Capacidad de base de datos; interfaz no implementada en `src/` | La migración `005` dejó la columna y el bucket, y la `012` retiró el soporte. No existe interfaz de carga, reemplazo ni marcadores en este código. |
 | Baja definitiva de equipos | Pendiente en staging | Dar de baja, abrir el detalle, confirmar el código y comprobar `equipos_eliminados` y la auditoría |
 | Mantenimientos | Pendiente en staging | Crear, editar y comprobar el historial |
 | QR | Pendiente en staging | Abrir el QR, seguir el enlace `.dev` e imprimir |
@@ -58,13 +63,13 @@ El script crea fixtures y hace pruebas de escritura dentro de bloques PL/pgSQL q
 El workflow backup-postgres.yml solo valida scripts con datos ficticios y no
 conserva respaldos de produccion. No requiere servicios de almacenamiento ni secretos.
 Usar scripts/backup-postgres-local.ps1 y scripts/verificar-restaurar-local.ps1
-segun [la guia operativa](operaciones/restauracion-backup.md). Registrar una tarea
+según [la guía operativa](../operaciones/respaldos-restauracion.md). Registrar una tarea
 Windows es un paso adicional: no afirmar automatizacion hasta comprobar ejecuciones
 y restauracion de una copia reciente. Storage y Drive requieren copias independientes.
 
 ## Prueba de restauracion
 
-Seguir operaciones/restauracion-backup.md. El verificador solo admite loopback y
+Seguir `../operaciones/respaldos-restauracion.md`. El verificador solo admite loopback y
 crea una base descartable nueva; compara conteos con el propio snapshot. No restaura
 ACL originales ni certifica servicios gestionados, por lo que una recuperacion
 completa requiere pruebas adicionales. No usar produccion como destino de ensayo.
@@ -77,4 +82,4 @@ Para validar el plan gratuito, registrar semanalmente en Supabase **Settings →
 
 El workflow `.github/workflows/ci.yml` instala dependencias con `npm ci`, ejecuta `npm test`, lint, build y `deno check` sobre todas las Edge Functions. Las variables Supabase de compilación son valores ficticios no funcionales; no se guardan secretos de producción en el workflow. Las pruebas automáticas incluyen utilidades de inventario/CSV, los helpers de limpieza por lotes y pruebas de integración SQL con PGlite sobre las migraciones `015` y `016` (idempotencia, triggers, RPC y permisos de la tabla de limpieza diferida). El estado de la matriz funcional, RLS en un proyecto real y la restauración siguen requiriendo evidencia manual de staging.
 
-El informe de cierre con las matrices RB-01…RB-12 y CA-01…CA-16, los hallazgos, el estado de las validaciones y el veredicto técnico está en `documentacion/auditoria-cierre.md`.
+El informe de cierre con las matrices RB-01…RB-12 y CA-01…CA-16, los hallazgos, el estado de las validaciones y el veredicto técnico se conserva como evidencia histórica en [auditoría de cierre](../historico/auditoria-cierre-2026-10-25.md). Sus cifras y redacción corresponden al 25 de octubre de 2026.
